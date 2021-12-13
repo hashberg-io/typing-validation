@@ -35,8 +35,8 @@ jobs:
         pytest
     - name: Lint with mypy
       run: |
-        mypy --strict PACKAGE_NAME
+        mypy --strict typing_validation
     - name: Lint with pylint
       run: |
-        pylint --errors-only --rcfile=.pylintrc PACKAGE_NAME
-        pylint --exit-zero --rcfile=.pylintrc PACKAGE_NAME
+        pylint --errors-only --rcfile=.pylintrc typing_validation
+        pylint --exit-zero --rcfile=.pylintrc typing_validation
