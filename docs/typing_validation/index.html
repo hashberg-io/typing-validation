@@ -24,15 +24,15 @@
 </header>
 <section id="section-intro">
 <p>Runtime typing validation.</p>
-<p>The core functionality of this library is provided by the <code>validate</code> function:</p>
+<p>The core functionality of this library is provided by the <code><a title="typing_validation.validation.validate" href="validation.html#typing_validation.validation.validate">validate()</a></code> function:</p>
 <pre><code class="language-py">&gt;&gt;&gt; from typing_validation import validate
 </code></pre>
-<p>The <code>validate</code> function is invoked with a value and a type as its arguments and
+<p>The <code><a title="typing_validation.validation.validate" href="validation.html#typing_validation.validation.validate">validate()</a></code> function is invoked with a value and a type as its arguments and
 it returns nothing when the given value is valid for the given type:</p>
 <pre><code class="language-py">&gt;&gt;&gt; validate(12, int)
 # nothing is returned =&gt; 12 is a valid int
 </code></pre>
-<p>If the value is invalid for the given type, the <code>validate</code> function raises a <code>TypeError</code>:</p>
+<p>If the value is invalid for the given type, the <code><a title="typing_validation.validation.validate" href="validation.html#typing_validation.validation.validate">validate()</a></code> function raises a <code>TypeError</code>:</p>
 <pre><code class="language-py">&gt;&gt;&gt; validate(12, str)
 TypeError: For type &lt;class 'str'&gt;, invalid value: 12
 </code></pre>
@@ -65,13 +65,13 @@ invalid value: [[0, 1, 2], {'hi': 0}]
 <pre><code class="python">&#34;&#34;&#34;
     Runtime typing validation.
 
-    The core functionality of this library is provided by the `validate` function:
+    The core functionality of this library is provided by the `typing_validation.validation.validate` function:
 
     ```py
     &gt;&gt;&gt; from typing_validation import validate
     ```
 
-    The `validate` function is invoked with a value and a type as its arguments and
+    The `typing_validation.validation.validate` function is invoked with a value and a type as its arguments and
     it returns nothing when the given value is valid for the given type:
 
     ```py
@@ -79,7 +79,7 @@ invalid value: [[0, 1, 2], {'hi': 0}]
     # nothing is returned =&gt; 12 is a valid int
     ```
 
-    If the value is invalid for the given type, the `validate` function raises a `TypeError`:
+    If the value is invalid for the given type, the `typing_validation.validation.validate` function raises a `TypeError`:
 
     ```py
     &gt;&gt;&gt; validate(12, str)

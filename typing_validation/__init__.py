@@ -1,13 +1,13 @@
 """
     Runtime typing validation.
 
-    The core functionality of this library is provided by the `validate` function:
+    The core functionality of this library is provided by the `typing_validation.validation.validate` function:
 
     ```py
     >>> from typing_validation import validate
     ```
 
-    The `validate` function is invoked with a value and a type as its arguments and
+    The `typing_validation.validation.validate` function is invoked with a value and a type as its arguments and
     it returns nothing when the given value is valid for the given type:
 
     ```py
@@ -15,7 +15,7 @@
     # nothing is returned => 12 is a valid int
     ```
 
-    If the value is invalid for the given type, the `validate` function raises a `TypeError`:
+    If the value is invalid for the given type, the `typing_validation.validation.validate` function raises a `TypeError`:
 
     ```py
     >>> validate(12, str)
