@@ -54,7 +54,8 @@ invalid value: [[0, 1, 2], {'hi': 0}]
       For type &lt;class 'str'&gt;, invalid value: 0
 </code></pre>
 <p><strong>Note.</strong> Traceback information was hidden in the above examples, for clarity:</p>
-<pre><code class="language-py">&gt;&gt;&gt; import sys
+<pre><code class="language-py">Python 3.9.7
+&gt;&gt;&gt; import sys
 &gt;&gt;&gt; sys.tracebacklimit = 0
 </code></pre>
 <details class="source">
@@ -111,12 +112,13 @@ invalid value: [[0, 1, 2], {'hi': 0}]
     **Note.** Traceback information was hidden in the above examples, for clarity:
 
     ```py
+    Python 3.9.7
     &gt;&gt;&gt; import sys
     &gt;&gt;&gt; sys.tracebacklimit = 0
     ```
 &#34;&#34;&#34;
 
-__version__ = &#34;0.0.0&#34;
+__version__ = &#34;0.0.1&#34;
 
 from .validate import validate, get_validation_failure, latest_validation_failure
 
