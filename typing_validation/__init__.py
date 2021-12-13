@@ -55,7 +55,7 @@
 
 __version__ = "0.0.0"
 
-from .validate import validate, latest_validation_failure
+from .validate import validate, get_validation_failure, latest_validation_failure
 
 # re-export all encodings and functions.
 __all__ = [

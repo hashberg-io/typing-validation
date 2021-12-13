@@ -4,8 +4,10 @@
 
 import collections
 import collections.abc as collections_abc
+import inspect
 import sys
 import typing
+from typing import Any, cast, Optional, Union
 
 if sys.version_info[1] >= 8:
     from typing import Literal
@@ -14,6 +16,9 @@ else:
 
 # constant for the type of None
 _NoneType = type(None)
+
+# basic types
+_basic_types = frozenset({bool, int, float, complex, bytes, bytearray, memoryview, str, range, slice})
 
 # collection types (parametric on item type)
 _collection_pseudotypes_dict = {
@@ -63,7 +68,7 @@ _other_pseudotypes = frozenset(_other_pseudotypes_dict.keys())|frozenset(_other_
 _other_origins = frozenset(_other_pseudotypes_dict.values())
 
 # all types together
-_pseudotypes_dict: typing.Mapping[typing.Any, typing.Any] = {
+_pseudotypes_dict: typing.Mapping[Any, Any] = {
     **_collection_pseudotypes_dict,
     **_maybe_collection_pseudotypes_dict,
     **_mapping_pseudotypes_dict,
@@ -80,18 +85,19 @@ def _indent(msg: str) -> str:
 _Acc = typing.TypeVar("_Acc")
 _T = typing.TypeVar("_T", bound="ValidationFailure")
 
+
 class ValidationFailure:
     """
         Simple container class for validation failures.
     """
 
-    _val: typing.Any
-    _t: typing.Any
+    _val: Any
+    _t: Any
     _causes: typing.Tuple["ValidationFailure", ...]
     _is_union: bool
 
     def __new__(cls: typing.Type[_T],
-                val: typing.Any, t: typing.Any,
+                val: Any, t: Any,
                 *causes: "ValidationFailure",
                 is_union: bool = False) -> _T:
         instance: _T = super().__new__(cls)
@@ -104,12 +110,12 @@ class ValidationFailure:
         return instance
 
     @property
-    def val(self) -> typing.Any:
+    def val(self) -> Any:
         """ The value involved in the validation failure. """
         return self._val
 
     @property
-    def t(self) -> typing.Any:
+    def t(self) -> Any:
         """ The type involved in the validation failure. """
         return self._t
 
@@ -123,7 +129,7 @@ class ValidationFailure:
         """ Whether this validation failure concerns a union type. """
         return self._is_union
 
-    def visit(self, fun: typing.Callable[[typing.Any, typing.Any, _Acc], _Acc], acc: _Acc) -> None:
+    def visit(self, fun: typing.Callable[[Any, Any, _Acc], _Acc], acc: _Acc) -> None:
         """
             Performs a pre-order visit of the validation failure tree:
 
@@ -180,7 +186,7 @@ class ValidationFailure:
             is_union_str = ", is_union=True"
         return f"ValidationFailure({repr(self.val)}, {repr(self.t)}{causes_str}{is_union_str})"
 
-def _type_error(val: typing.Any, t: typing.Any, *causes: TypeError, is_union: bool = False) -> TypeError:
+def _type_error(val: Any, t: Any, *causes: TypeError, is_union: bool = False) -> TypeError:
     """
         Type error arising from `val` not being an instance of type `t`.
         If other type errors are passed as causes, their error messages are indented and included.
@@ -197,25 +203,25 @@ def _type_error(val: typing.Any, t: typing.Any, *causes: TypeError, is_union: bo
     setattr(error, "validation_failure", validation_failure)
     return error
 
-def _missing_args_msg(t: typing.Any) -> str:
+def _missing_args_msg(t: Any) -> str:
     """ Error message for missing `__args__` attribute on a type `t`. """
     return f"For type {repr(t)}, expected '__args__' attribute." # pragma: nocover
 
-def _wrong_args_num_msg(t: typing.Any, num_args: int) -> str:
+def _wrong_args_num_msg(t: Any, num_args: int) -> str:
     """ Error message for incorrect number of `__args__` on a type `t`. """
     return f"For type {repr(t)}, expected '__args__' to be tuple with {num_args} elements." # pragma: nocover
 
-def _validate_type(val: typing.Any, t: type) -> None:
+def _validate_type(val: Any, t: type) -> None:
     """ Basic validation using `isinstance` """
     if not isinstance(val, t):
         raise _type_error(val, t)
 
-def _validate_collection(val: typing.Any, t: typing.Any) -> None:
+def _validate_collection(val: Any, t: Any) -> None:
     """ Parametric collection validation (i.e. recursive validation of all items). """
     assert hasattr(t, "__args__"), _missing_args_msg(t)
     assert isinstance(t.__args__, tuple) and len(t.__args__) == 1, _wrong_args_num_msg(t, 1)
     item_t = t.__args__[0]
-    item_error: typing.Optional[TypeError] = None
+    item_error: Optional[TypeError] = None
     for item in val:
         try:
             validate(item, item_t)
@@ -225,12 +231,12 @@ def _validate_collection(val: typing.Any, t: typing.Any) -> None:
     if item_error:
         raise _type_error(val, t, item_error)
 
-def _validate_mapping(val: typing.Any, t: typing.Any) -> None:
+def _validate_mapping(val: Any, t: Any) -> None:
     """ Parametric mapping validation (i.e. recursive validation of all keys and values). """
     assert hasattr(t, "__args__"), _missing_args_msg(t)
     assert isinstance(t.__args__, tuple) and len(t.__args__) == 2, _wrong_args_num_msg(t, 2)
     key_t, value_t = t.__args__
-    item_error: typing.Optional[TypeError] = None
+    item_error: Optional[TypeError] = None
     for key, value in val.items():
         try:
             validate(key, key_t)
@@ -241,7 +247,7 @@ def _validate_mapping(val: typing.Any, t: typing.Any) -> None:
     if item_error:
         raise _type_error(val, t, item_error)
 
-def _validate_tuple(val: typing.Any, t: typing.Any) -> None:
+def _validate_tuple(val: Any, t: Any) -> None:
     """
         Parametric tuple validation (i.e. recursive validation of all items).
         Two cases:
@@ -251,7 +257,7 @@ def _validate_tuple(val: typing.Any, t: typing.Any) -> None:
     """
     assert hasattr(t, "__args__"), _missing_args_msg(t)
     assert isinstance(t.__args__, tuple), f"For type {repr(t)}, expected '__args__' to be a tuple."
-    item_error: typing.Optional[TypeError] = None
+    item_error: Optional[TypeError] = None
     if ... in t.__args__: # variadic tuple
         assert len(t.__args__) == 2, _wrong_args_num_msg(t, 2)
         item_t = t.__args__[0]
@@ -273,7 +279,7 @@ def _validate_tuple(val: typing.Any, t: typing.Any) -> None:
     if item_error:
         raise _type_error(val, t, item_error)
 
-def _validate_union(val: typing.Any, t: typing.Any) -> None:
+def _validate_union(val: Any, t: Any) -> None:
     """
         Union type validation. Each type `u` listed in the union type `t` is checked:
 
@@ -295,7 +301,7 @@ def _validate_union(val: typing.Any, t: typing.Any) -> None:
             member_errors.append(e)
     raise _type_error(val, t, *member_errors, is_union=True)
 
-def _validate_literal(val: typing.Any, t: typing.Any) -> None:
+def _validate_literal(val: Any, t: Any) -> None:
     """
         Literal type validation.
     """
@@ -304,12 +310,22 @@ def _validate_literal(val: typing.Any, t: typing.Any) -> None:
     if val not in t.__args__:
         raise _type_error(val, t)
 
-def _validate(val: typing.Any, t: typing.Any) -> None:
+def validate(val: Any, t: Any) -> None:
     """
-        Selects the appropriate validation code based on the type.
+        Performs runtime type-checking for the value `val` against type `t`.
+        Raises `TypeError` if:
+
+        - `val` is not of type `t`
+        - validation for type `t` is not supported
+
+        In cases, such as typed collections/mappings, where items are recursively
+        validated, collection exceptions are raised from item exceptions, keeping
+        track of the chain of validation failure.
     """
     # pylint: disable = too-many-return-statements, too-many-branches
-    if t is typing.Any:
+    if t in _basic_types:
+        # speed things up for what is likely the most common case
+        _validate_type(val, t)
         return
     if t is None or t is _NoneType:
         if val is not None:
@@ -318,8 +334,10 @@ def _validate(val: typing.Any, t: typing.Any) -> None:
     if t in _pseudotypes:
         _validate_type(val, t)
         return
+    if t is Any:
+        return
     if hasattr(t, "__origin__"): # parametric types
-        if t.__origin__ is typing.Union:
+        if t.__origin__ is Union:
             _validate_union(val, t)
             return
         if t.__origin__ is Literal:
@@ -347,13 +365,37 @@ def _validate(val: typing.Any, t: typing.Any) -> None:
         return
     raise ValueError(f"Unsupported validation for type {repr(t)}") # pragma: nocover
 
-_validation_failure: typing.Optional[ValidationFailure] = None
-
-def latest_validation_failure() -> typing.Optional[ValidationFailure]:
+def get_validation_failure(err: TypeError) -> Optional[ValidationFailure]:
     """
-        Programmatic access to the validation failure tree for the latest validation.
-        This is `None` if the latest call to `validate` succeeded without error,
-        or if the error was not a validation error (i.e. not a `TypeError`).
+        Programmatic access to the validation failure tree for the latest validation call.
+        Must be called on the type error raised by `validate`.
+
+        ```py
+        >>> from typing_validation import validate, get_validation_failure
+        >>> try:
+        ...     validate([[0, 1], [1, 2], [2, "hi"]], list[list[int]])
+        ... except TypeError as err:
+        ...     validation_failure = get_validation_failure(err)
+        ...
+        >>> validation_failure
+        ValidationFailure([[0, 1], [1, 2], [2, 'hi']], list[list[int]],
+            ValidationFailure([2, 'hi'], list[int],
+                ValidationFailure('hi', <class 'int'>)))
+        ```
+    """
+    if not isinstance(err, TypeError):
+        raise TypeError(f"Expected TypeError, found {type(err)}")
+    if not hasattr(err, "validation_failure"):
+        return None
+    validation_failure = getattr(err, "validation_failure")
+    if not isinstance(validation_failure, ValidationFailure):
+        return None
+    return validation_failure
+
+def latest_validation_failure() -> Optional[ValidationFailure]:
+    """
+        Programmatic access to the validation failure tree for the latest validation call.
+        Uses `sys.last_value()`, so it must be called immediately after the error occurred.
 
         ```py
         >>> from typing_validation import validate, latest_validation_failure
@@ -365,26 +407,48 @@ def latest_validation_failure() -> typing.Optional[ValidationFailure]:
                 ValidationFailure('hi', <class 'int'>)))
         ```
     """
-    return _validation_failure
-
-def validate(val: typing.Any, t: typing.Any) -> None:
-    """
-        Performs runtime type-checking for the value `val` against type `t`.
-        Raises `TypeError` if:
-
-        - `val` is not of type `t`
-        - validation for type `t` is not supported
-
-        In cases, such as typed collections/mappings, where items are recursively
-        validated, collection exceptions are raised from item exceptions, keeping
-        track of the chain of validation failure.
-    """
-    global _validation_failure # pylint: disable=global-statement
-    _validation_failure = None
     try:
-        _validate(val, t)
-    except TypeError as e:
-        if hasattr(e, "validation_failure"):
-            _validation_failure = getattr(e, "validation_failure")
-            assert isinstance(_validation_failure, ValidationFailure)
-        raise e
+        err = sys.last_value # pylint: disable = no-member
+    except AttributeError:
+        return None
+    if not isinstance(err, TypeError):
+        return None
+    return get_validation_failure(err)
+
+# _F = typing.TypeVar('_F', bound=typing.Callable[..., Any])
+
+# def validated(fun: _F, validate_return: bool = False) -> _F:
+#     """
+#         Decorator for automatic function validation.
+#         *Important note!* This can be significantly slower than manual validation.
+
+#         See https://mypy.readthedocs.io/en/stable/generics.html#declaring-decorators
+#     """
+#     fun_name = fun.__name__
+#     sig = inspect.signature(fun)
+#     empty = sig.empty
+#     params = sig.parameters
+#     ret_type = sig.return_annotation
+#     positional_only: typing.List[inspect.Parameter] = []
+#     positional_or_keyword: typing.Dict[str, inspect.Parameter] = {}
+#     var_positional: Optional[inspect.Parameter] = None
+#     keyword_only: typing.Dict[str, inspect.Parameter] = {}
+#     var_keyword: Optional[inspect.Parameter] = None
+#     for param_name, param in params.items():
+#         if param.kind == param.POSITIONAL_ONLY:
+#             positional_only.append(param)
+#         elif param.kind == param.POSITIONAL_OR_KEYWORD:
+#             positional_or_keyword[param_name] = param
+#         elif param.kind == param.VAR_POSITIONAL:
+#             var_positional = param
+#         elif param.kind == param.KEYWORD_ONLY:
+#             keyword_only[param_name] = param
+#         elif param.kind == param.VAR_KEYWORD:
+#             var_keyword = param
+#     def _fun(*args: Any, **kwargs: Any) -> Any:
+#         ... # validate here...
+#         res = fun(*args, **kwargs)
+#         if validate_return and ret_type != empty:
+#             validate(res, ret_type)
+#         return res
+#     return cast(_F, _fun)
