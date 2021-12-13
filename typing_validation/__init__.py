@@ -56,13 +56,15 @@
 
 __version__ = "0.0.1"
 
-from .validate import validate, get_validation_failure, latest_validation_failure
+from .validation import validate
+from .validation_failure import get_validation_failure, latest_validation_failure
 
 # re-export all encodings and functions.
 __all__ = [
     "validate",
+    "get_validation_failure",
     "latest_validation_failure"
 ]
 
-# remove memberse already documented in their originale modules
+# remove members already documented in their originale modules
 __pdoc__ = {name: False for name in __all__}

@@ -1,5 +1,5 @@
 """
-    Runtime typing validation.
+    Type validation function.
 """
 
 import collections
@@ -7,6 +7,8 @@ import collections.abc as collections_abc
 import sys
 import typing
 from typing import Any, Optional, Union
+
+from .validation_failure import ValidationFailure
 
 if sys.version_info[1] >= 8:
     from typing import Literal
@@ -76,121 +78,11 @@ _pseudotypes_dict: typing.Mapping[Any, Any] = {
 _pseudotypes = (_collection_pseudotypes|_maybe_collection_pseudotypes|_mapping_pseudotypes|_tuple_pseudotypes|_other_pseudotypes)
 _origins = (_collection_origins|_maybe_collection_origins|_mapping_origins|_tuple_origins|_other_origins)
 
-def _indent(msg: str) -> str:
-    """ Indent a block of text (possibly with newlines) """
-    ind = " "*2
-    return ind+msg.replace("\n", "\n"+ind)
-
-_Acc = typing.TypeVar("_Acc")
-_T = typing.TypeVar("_T", bound="ValidationFailure")
-
-
-class ValidationFailure:
-    """
-        Simple container class for validation failures.
-    """
-
-    _val: Any
-    _t: Any
-    _causes: typing.Tuple["ValidationFailure", ...]
-    _is_union: bool
-
-    def __new__(cls: typing.Type[_T],
-                val: Any, t: Any,
-                *causes: "ValidationFailure",
-                is_union: bool = False) -> _T:
-        instance: _T = super().__new__(cls)
-        instance._val = val
-        instance._t = t
-        instance._causes = causes
-        instance._is_union = is_union
-        if is_union:
-            assert all(cause.val == val for cause in causes)
-        return instance
-
-    @property
-    def val(self) -> Any:
-        """ The value involved in the validation failure. """
-        return self._val
-
-    @property
-    def t(self) -> Any:
-        """ The type involved in the validation failure. """
-        return self._t
-
-    @property
-    def causes(self) -> typing.Tuple["ValidationFailure", ...]:
-        """ Validation failure that in turn caused this failure (if any). """
-        return self._causes
-
-    @property
-    def is_union(self) -> bool:
-        """ Whether this validation failure concerns a union type. """
-        return self._is_union
-
-    def visit(self, fun: typing.Callable[[Any, Any, _Acc], _Acc], acc: _Acc) -> None:
-        """
-            Performs a pre-order visit of the validation failure tree:
-
-            1. applies `fun(self.val, self.t, acc)` to the failure,
-            2. saves the return value as `new_acc`
-            3. recurses on all causes using `new_acc`.
-
-            Example usage to pretty-print the validation failure tree using [rich](https://github.com/willmcgugan/rich):
-
-            ```py
-            Python 3.9.7
-            >>> import rich
-            >>> from typing import Union, Collection
-            >>> from typing_validation import validate, latest_validation_failure
-            >>> validate([[0, 1, 2], {"hi": 0}], list[Union[Collection[int], dict[str, str]]])
-            TypeError: ...
-            >>> failure_tree = rich.tree.Tree("Failure tree")
-            >>> def tree_builder(val, t, tree_tip) -> None:
-            ...     label = rich.text.Text(f"({repr(t)}, {repr(val)})")
-            ...     return tree_tip.add(label) # see https://rich.readthedocs.io/en/latest/tree.html
-            ...
-            >>> latest_validation_failure().visit(tree_builder, failure_tree)
-            >>> rich.print(failure_tree)
-            Failure tree
-            └── (list[typing.Union[typing.Collection[int], dict[str, str]]], [[0, 1, 2], {'hi': 0}])
-                └── (typing.Union[typing.Collection[int], dict[str, str]], {'hi': 0})
-                    ├── (typing.Collection[int], {'hi': 0})
-                    │   └── (<class 'int'>, 'hi')
-                    └── (dict[str, str], {'hi': 0})
-                        └── (<class 'str'>, 0)
-            ```
-        """
-        new_acc = fun(self.val, self.t, acc)
-        for cause in self.causes:
-            cause.visit(fun, new_acc)
-
-    def __str__(self) -> str:
-        msg = f"For type {repr(self.t)}, invalid value: {repr(self.val)}"
-        if self._is_union:
-            for cause in (cause for cause in self.causes if cause.causes):
-                msg += "\n"+_indent(f"Detailed failures for member type {repr(cause.t)}:")
-                for sub_cause in cause.causes:
-                    msg += "\n"+_indent(_indent(str(sub_cause)))
-        else:
-            for cause in self.causes:
-                msg += "\n"+_indent(str(cause))
-        return msg
-
-    def __repr__(self) -> str:
-        causes_str = ""
-        if self.causes:
-            causes_str = ", "+", ".join(repr(cause) for cause in self.causes)
-        is_union_str = ""
-        if self._is_union:
-            is_union_str = ", is_union=True"
-        return f"ValidationFailure({repr(self.val)}, {repr(self.t)}{causes_str}{is_union_str})"
-
 def _type_error(val: Any, t: Any, *causes: TypeError, is_union: bool = False) -> TypeError:
     """
         Type error arising from `val` not being an instance of type `t`.
         If other type errors are passed as causes, their error messages are indented and included.
-        A `validation_failure` attribute of type `ValidationFailure` is set for the error,
+        A `validation_failure` attribute of type ValidationFailure is set for the error,
         including full information about the chain of validation failures.
     """
     _causes: typing.Tuple[ValidationFailure, ...] = tuple(
@@ -375,58 +267,6 @@ def validate(val: Any, t: Any) -> None:
         _validate_type(val, t)
         return
     raise ValueError(f"Unsupported validation for type {repr(t)}") # pragma: nocover
-
-def get_validation_failure(err: TypeError) -> Optional[ValidationFailure]:
-    """
-        Programmatic access to the validation failure tree for the latest validation call.
-        Must be called on the type error raised by `validate`.
-
-        ```py
-        Python 3.9.7
-        >>> from typing_validation import validate, get_validation_failure
-        >>> try:
-        ...     validate([[0, 1], [1, 2], [2, "hi"]], list[list[int]])
-        ... except TypeError as err:
-        ...     validation_failure = get_validation_failure(err)
-        ...
-        >>> validation_failure
-        ValidationFailure([[0, 1], [1, 2], [2, 'hi']], list[list[int]],
-            ValidationFailure([2, 'hi'], list[int],
-                ValidationFailure('hi', <class 'int'>)))
-        ```
-    """
-    if not isinstance(err, TypeError):
-        raise TypeError(f"Expected TypeError, found {type(err)}")
-    if not hasattr(err, "validation_failure"):
-        return None
-    validation_failure = getattr(err, "validation_failure")
-    if not isinstance(validation_failure, ValidationFailure):
-        return None
-    return validation_failure
-
-def latest_validation_failure() -> Optional[ValidationFailure]:
-    """
-        Programmatic access to the validation failure tree for the latest validation call.
-        Uses `sys.last_value()`, so it must be called immediately after the error occurred.
-
-        ```py
-        Python 3.9.7
-        >>> from typing_validation import validate, latest_validation_failure
-        >>> validate([[0, 1], [1, 2], [2, "hi"]], list[list[int]])
-        TypeError: ...
-        >>> latest_validation_failure()
-        ValidationFailure([[0, 1], [1, 2], [2, 'hi']], list[list[int]],
-            ValidationFailure([2, 'hi'], list[int],
-                ValidationFailure('hi', <class 'int'>)))
-        ```
-    """
-    try:
-        err = sys.last_value # pylint: disable = no-member
-    except AttributeError:
-        return None
-    if not isinstance(err, TypeError):
-        return None
-    return get_validation_failure(err)
 
 # _F = typing.TypeVar('_F', bound=typing.Callable[..., Any])
 

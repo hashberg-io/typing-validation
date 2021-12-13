@@ -6,7 +6,7 @@ import typing
 
 import pytest
 
-from typing_validation.validate import (validate, _pseudotypes, _pseudotypes_dict)
+from typing_validation.validation import (validate, _pseudotypes, _pseudotypes_dict)
 
 if sys.version_info[1] >= 8:
     from typing import Literal
