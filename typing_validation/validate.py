@@ -77,6 +77,7 @@ def _indent(msg: str) -> str:
     ind = " "*2
     return ind+msg.replace("\n", "\n"+ind)
 
+_Acc = typing.TypeVar("_Acc")
 _T = typing.TypeVar("_T", bound="ValidationFailure")
 
 class ValidationFailure:
@@ -122,53 +123,41 @@ class ValidationFailure:
         """ Whether this validation failure concerns a union type. """
         return self._is_union
 
-    def _build_rich_tree(self, tree: typing.Any=None) -> typing.Any:
-        # pylint: disable = import-outside-toplevel
-        try:
-            from rich.tree import Tree
-            from rich.text import Text
-        except ModuleNotFoundError as e:
-            raise ModuleNotFoundError("The rich library must be installed.") from e
-        label = Text(f"({repr(self.t)}, {repr(self.val)})")
-        if tree is None:
-            tree = Tree(label)
-        else:
-            tree = tree.add(label)
-        for cause in self.causes:
-            cause._build_rich_tree(tree)
-        return tree
-
-    def tree_view(self) -> None:
+    def visit(self, fun: typing.Callable[[typing.Any, typing.Any, _Acc], _Acc], acc: _Acc) -> None:
         """
-            Prints a tree view of the validation vailure and its tree of causes:
+            Performs a pre-order visit of the validation failure tree:
+
+            1. applies `fun(self.val, self.t, acc)` to the failure,
+            2. saves the return value as `new_acc`
+            3. recurses on all causes using `new_acc`.
+
+            Example usage to pretty-print the validation failure tree using [rich](https://github.com/willmcgugan/rich):
 
             ```py
-            >>> from typing import *
+            >>> import rich
+            >>> from typing import Union, Collection
             >>> from typing_validation import validate, latest_validation_failure
-            >>> try:
-            ...     validate([[0, 1, 2], {"hi": 0}], list[Union[Collection[int], dict[str, str]]])
-            ... except TypeError:
-            ...     failure = latest_validation_failure()
+            >>> validate([[0, 1, 2], {"hi": 0}], list[Union[Collection[int], dict[str, str]]])
+            TypeError: ...
+            >>> failure_tree = rich.tree.Tree("Failure tree")
+            >>> def tree_builder(val, t, tree_tip) -> None:
+            ...     label = rich.text.Text(f"({repr(t)}, {repr(val)})")
+            ...     return tree_tip.add(label) # see https://rich.readthedocs.io/en/latest/tree.html
             ...
-            >>> failure.tree_view()
-            (list[typing.Union[typing.Collection[int], dict[str, str]]], [[0, 1, 2], {'hi': 0}])
-            └── (typing.Union[typing.Collection[int], dict[str, str]], {'hi': 0})
-                ├── (typing.Collection[int], {'hi': 0})
-                │   └── (<class 'int'>, 'hi')
-                └── (dict[str, str], {'hi': 0})
-                    └── (<class 'str'>, 0)
+            >>> latest_validation_failure().visit(tree_builder, failure_tree)
+            >>> rich.print(failure_tree)
+            Failure tree
+            └── (list[typing.Union[typing.Collection[int], dict[str, str]]], [[0, 1, 2], {'hi': 0}])
+                └── (typing.Union[typing.Collection[int], dict[str, str]], {'hi': 0})
+                    ├── (typing.Collection[int], {'hi': 0})
+                    │   └── (<class 'int'>, 'hi')
+                    └── (dict[str, str], {'hi': 0})
+                        └── (<class 'str'>, 0)
             ```
-
-            The [`rich` library](https://github.com/willmcgugan/rich) must be installed to use this method.
-
         """
-        # pylint: disable = import-outside-toplevel
-        try:
-            import rich
-        except ModuleNotFoundError as e:
-            raise ModuleNotFoundError("The rich library must be installed to use ValidationFailure.tree_view.") from e
-        tree = self._build_rich_tree()
-        rich.print(tree)
+        new_acc = fun(self.val, self.t, acc)
+        for cause in self.causes:
+            cause.visit(fun, new_acc)
 
     def __str__(self) -> str:
         msg = f"For type {repr(self.t)}, invalid value: {repr(self.val)}"
@@ -275,8 +264,6 @@ def _validate_tuple(val: typing.Any, t: typing.Any) -> None:
     else: # fixed-length tuple
         if len(val) != len(t.__args__):
             raise _type_error(val, t)
-            # raise TypeError(f"For tuple type {repr(t)}, the following tuple value has incorrect length "
-            #                 f"(found {len(val)}, expected {len(t.__args__)}): {repr(val)}.")
         for item_t, item in zip(t.__args__, val):
             try:
                 validate(item, item_t)
@@ -370,15 +357,12 @@ def latest_validation_failure() -> typing.Optional[ValidationFailure]:
 
         ```py
         >>> from typing_validation import validate, latest_validation_failure
-        >>> try:
-        ...     validate([[0, 1], [1, 2], [2, "hi"]], list[list[int]])
-        ... except TypeError:
-        ...     failure = latest_validation_failure()
-        ...
-        >>> failure
+        >>> validate([[0, 1], [1, 2], [2, "hi"]], list[list[int]])
+        TypeError: ...
+        >>> latest_validation_failure()
         ValidationFailure([[0, 1], [1, 2], [2, 'hi']], list[list[int]],
-                          ValidationFailure([2, 'hi'], list[int],
-                                            ValidationFailure('hi', <class 'int'>)))
+            ValidationFailure([2, 'hi'], list[int],
+                ValidationFailure('hi', <class 'int'>)))
         ```
     """
     return _validation_failure

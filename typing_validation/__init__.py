@@ -53,4 +53,15 @@
     ```
 """
 
+__version__ = "0.0.0"
+
 from .validate import validate, latest_validation_failure
+
+# re-export all encodings and functions.
+__all__ = [
+    "validate",
+    "latest_validation_failure"
+]
+
+# remove memberse already documented in their originale modules
+__pdoc__ = {name: False for name in __all__}
