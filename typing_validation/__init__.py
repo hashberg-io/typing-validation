@@ -48,12 +48,13 @@
     **Note.** Traceback information was hidden in the above examples, for clarity:
 
     ```py
+    Python 3.9.7
     >>> import sys
     >>> sys.tracebacklimit = 0
     ```
 """
 
-__version__ = "0.0.0"
+__version__ = "0.0.1"
 
 from .validate import validate, get_validation_failure, latest_validation_failure
 

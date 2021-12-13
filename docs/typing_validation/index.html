@@ -24,15 +24,15 @@
 </header>
 <section id="section-intro">
 <p>Runtime typing validation.</p>
-<p>The core functionality of this library is provided by the <code><a title="typing_validation.validate" href="validate.html">typing_validation.validate</a></code> function:</p>
+<p>The core functionality of this library is provided by the <code>validate</code> function:</p>
 <pre><code class="language-py">&gt;&gt;&gt; from typing_validation import validate
 </code></pre>
-<p>The <code><a title="typing_validation.validate" href="validate.html">typing_validation.validate</a></code> function is invoked with a value and a type as its arguments and
+<p>The <code>validate</code> function is invoked with a value and a type as its arguments and
 it returns nothing when the given value is valid for the given type:</p>
 <pre><code class="language-py">&gt;&gt;&gt; validate(12, int)
 # nothing is returned =&gt; 12 is a valid int
 </code></pre>
-<p>If the value is invalid for the given type, the <code><a title="typing_validation.validate" href="validate.html">typing_validation.validate</a></code> function raises a <code>TypeError</code>:</p>
+<p>If the value is invalid for the given type, the <code>validate</code> function raises a <code>TypeError</code>:</p>
 <pre><code class="language-py">&gt;&gt;&gt; validate(12, str)
 TypeError: For type &lt;class 'str'&gt;, invalid value: 12
 </code></pre>
@@ -116,17 +116,21 @@ invalid value: [[0, 1, 2], {'hi': 0}]
     ```
 &#34;&#34;&#34;
 
-from .validate import validate, latest_validation_failure</code></pre>
+__version__ = &#34;0.0.0&#34;
+
+from .validate import validate, get_validation_failure, latest_validation_failure
+
+# re-export all encodings and functions.
+__all__ = [
+    &#34;validate&#34;,
+    &#34;latest_validation_failure&#34;
+]
+
+# remove memberse already documented in their originale modules
+__pdoc__ = {name: False for name in __all__}</code></pre>
 </details>
 </section>
 <section>
-<h2 class="section-title" id="header-submodules">Sub-modules</h2>
-<dl>
-<dt><code class="name"><a title="typing_validation.validate" href="validate.html">typing_validation.validate</a></code></dt>
-<dd>
-<div class="desc"><p>Runtime typing validation.</p></div>
-</dd>
-</dl>
 </section>
 <section>
 </section>
@@ -141,11 +145,6 @@ from .validate import validate, latest_validation_failure</code></pre>
 <ul></ul>
 </div>
 <ul id="index">
-<li><h3><a href="#header-submodules">Sub-modules</a></h3>
-<ul>
-<li><code><a title="typing_validation.validate" href="validate.html">typing_validation.validate</a></code></li>
-</ul>
-</li>
 </ul>
 </nav>
 </main>

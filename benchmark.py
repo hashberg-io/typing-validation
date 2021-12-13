@@ -1,9 +1,10 @@
 """
-Typically takes around 5ns per byte of validation data on my machine.
+Rough and messy basic benchmarking code. Will be replaced by a suitable random generation module
+in the future (likely absorbing the one currently implemented by [dag-cbor](https://github.com/hashberg-io/dag-cbor)).
 
-Note that union type validation multiplies the number of data bytes
-by the number of types in the union, for uniformity of comparison with
-other validation cases.
+Validation takes around 5ns per byte of validation data on my machine.
+Note that union type validation multiplies the number of data bytes by the number of types in the union,
+for uniformity of comparison with other validation cases.
 
 1.557ns/B sumprod (100000 iters)
 1.225ns/B append (100000 iters)

@@ -4,10 +4,9 @@
 
 import collections
 import collections.abc as collections_abc
-import inspect
 import sys
 import typing
-from typing import Any, cast, Optional, Union
+from typing import Any, Optional, Union
 
 if sys.version_info[1] >= 8:
     from typing import Literal
@@ -140,6 +139,7 @@ class ValidationFailure:
             Example usage to pretty-print the validation failure tree using [rich](https://github.com/willmcgugan/rich):
 
             ```py
+            Python 3.9.7
             >>> import rich
             >>> from typing import Union, Collection
             >>> from typing_validation import validate, latest_validation_failure
@@ -313,18 +313,29 @@ def _validate_literal(val: Any, t: Any) -> None:
 def validate(val: Any, t: Any) -> None:
     """
         Performs runtime type-checking for the value `val` against type `t`.
-        Raises `TypeError` if:
+        Raises `TypeError` if `val` is not of type `t`.
+        Raises `ValueError` if validation for type `t` is not supported.
+        Raises `AssertionError` if things go unexpectedly wrong with `__args__` for parametric types.
 
-        - `val` is not of type `t`
-        - validation for type `t` is not supported
+        For structured types, the error message keeps track of the chain of validation failures, e.g.
 
-        In cases, such as typed collections/mappings, where items are recursively
-        validated, collection exceptions are raised from item exceptions, keeping
-        track of the chain of validation failure.
+        ```py
+        Python 3.9.7
+        >>> from typing import *
+        >>> from typing_validation import validate
+        >>> validate([[0, 1, 2], {"hi": 0}], list[Union[Collection[int], dict[str, str]]])
+        TypeError: For type list[typing.Union[typing.Collection[int], dict[str, str]]],
+        invalid value: [[0, 1, 2], {'hi': 0}]
+          For type typing.Union[typing.Collection[int], dict[str, str]], invalid value: {'hi': 0}
+            Detailed failures for member type typing.Collection[int]:
+              For type <class 'int'>, invalid value: 'hi'
+            Detailed failures for member type dict[str, str]:
+              For type <class 'str'>, invalid value: 0
+        ```
     """
     # pylint: disable = too-many-return-statements, too-many-branches
     if t in _basic_types:
-        # speed things up for what is likely the most common case
+        # speed things up for the likely most common case
         _validate_type(val, t)
         return
     if t is None or t is _NoneType:
@@ -371,6 +382,7 @@ def get_validation_failure(err: TypeError) -> Optional[ValidationFailure]:
         Must be called on the type error raised by `validate`.
 
         ```py
+        Python 3.9.7
         >>> from typing_validation import validate, get_validation_failure
         >>> try:
         ...     validate([[0, 1], [1, 2], [2, "hi"]], list[list[int]])
@@ -398,6 +410,7 @@ def latest_validation_failure() -> Optional[ValidationFailure]:
         Uses `sys.last_value()`, so it must be called immediately after the error occurred.
 
         ```py
+        Python 3.9.7
         >>> from typing_validation import validate, latest_validation_failure
         >>> validate([[0, 1], [1, 2], [2, "hi"]], list[list[int]])
         TypeError: ...
