@@ -21,7 +21,7 @@
 You can install the latest release from PyPI as follows:
 
 ```
-pip install typing-validation
+pip install --upgrade typing-validation
 ```
 
 ## Usage
