@@ -1,4 +1,4 @@
-# Python Typing Validation
+# `typing-validation`: A Python library for runtime type validation
 
 [![Generic badge](https://img.shields.io/badge/python-3.7+-green.svg)](https://docs.python.org/3.7/)
 [![PyPI version shields.io](https://img.shields.io/pypi/v/typing-validation.svg)](https://pypi.python.org/pypi/typing-validation/)
@@ -26,20 +26,20 @@ pip install typing-validation
 
 ## Usage
 
-The core functionality of this library is provided by the `validate` function:
+The core functionality of this library is provided by the [`validate`](https://hashberg-io.github.io/typing-validation/typing_validation/validation.html#typing_validation.validation.validate) function:
 
 ```py
 >>> from typing_validation import validate
 ```
 
-The `validate` function is invoked with a value and a type as its arguments and it returns nothing when the given value is valid for the given type:
+The [`validate`](https://hashberg-io.github.io/typing-validation/typing_validation/validation.html#typing_validation.validation.validate) function is invoked with a value and a type as its arguments and it returns nothing when the given value is valid for the given type:
 
 ```py
 >>> validate(12, int)
 # nothing is returned => 12 is a valid int
 ```
 
-If the value is invalid for the given type, the `validate` function raises a `TypeError`:
+If the value is invalid for the given type, the [`validate`](https://hashberg-io.github.io/typing-validation/typing_validation/validation.html#typing_validation.validation.validate) function raises a `TypeError`:
 
 ```py
 >>> validate(12, str)
