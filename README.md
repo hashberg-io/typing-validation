@@ -1,4 +1,4 @@
-# Template for Python repositories
+# Python Typing Validation
 
 [![Generic badge](https://img.shields.io/badge/python-3.7+-green.svg)](https://docs.python.org/3.7/)
 [![PyPI version shields.io](https://img.shields.io/pypi/v/typing-validation.svg)](https://pypi.python.org/pypi/typing-validation/)
