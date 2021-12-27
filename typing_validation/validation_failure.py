@@ -1,10 +1,12 @@
 """
-    Validation failure tracking.
+    Validation failure tracking functionality.
 """
+
+from __future__ import annotations
 
 import sys
 import typing
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 def _indent(msg: str) -> str:
     """ Indent a block of text (possibly with newlines) """
@@ -57,18 +59,16 @@ class ValidationFailure:
         """ Whether this validation failure concerns a union type. """
         return self._is_union
 
-    def visit(self, fun: typing.Callable[[Any, Any, _Acc], _Acc], acc: _Acc) -> None:
+    def visit(self, fun: Callable[[Any, Any, _Acc], _Acc], acc: _Acc) -> None:
         """
             Performs a pre-order visit of the validation failure tree:
 
-            1. applies `fun(self.val, self.t, acc)` to the failure,
-            2. saves the return value as `new_acc`
-            3. recurses on all causes using `new_acc`.
+            1. applies ``fun(self.val, self.t, acc)`` to the failure,
+            2. saves the return value as ``new_acc``
+            3. recurses on all causes using ``new_acc``.
 
-            Example usage to pretty-print the validation failure tree using [rich](https://github.com/willmcgugan/rich):
+            Example usage to pretty-print the validation failure tree using `rich <https://github.com/willmcgugan/rich>`_:
 
-            ```py
-            Python 3.9.7
             >>> import rich
             >>> from typing import Union, Collection
             >>> from typing_validation import validate, latest_validation_failure
@@ -88,7 +88,11 @@ class ValidationFailure:
                     │   └── (<class 'int'>, 'hi')
                     └── (dict[str, str], {'hi': 0})
                         └── (<class 'str'>, 0)
-            ```
+
+
+            :param fun: the function that will be called on each element of the failure tree during the visit
+            :type fun: :py:obj:`~typing.Callable`
+            :param acc: the initial value for the accumulator
         """
         new_acc = fun(self.val, self.t, acc)
         for cause in self.causes:
@@ -118,10 +122,7 @@ class ValidationFailure:
 def get_validation_failure(err: TypeError) -> Optional[ValidationFailure]:
     """
         Programmatic access to the validation failure tree for the latest validation call.
-        Must be called on the type error raised by `validate`.
 
-        ```py
-        Python 3.9.7
         >>> from typing_validation import validate, get_validation_failure
         >>> try:
         ...     validate([[0, 1], [1, 2], [2, "hi"]], list[list[int]])
@@ -132,7 +133,10 @@ def get_validation_failure(err: TypeError) -> Optional[ValidationFailure]:
         ValidationFailure([[0, 1], [1, 2], [2, 'hi']], list[list[int]],
             ValidationFailure([2, 'hi'], list[int],
                 ValidationFailure('hi', <class 'int'>)))
-        ```
+
+        :param err: type error raised by :func:`~typing_validation.validation.validate`
+        :type err: :py:obj:`TypeError`
+
     """
     if not isinstance(err, TypeError):
         raise TypeError(f"Expected TypeError, found {type(err)}")
@@ -146,10 +150,8 @@ def get_validation_failure(err: TypeError) -> Optional[ValidationFailure]:
 def latest_validation_failure() -> Optional[ValidationFailure]:
     """
         Programmatic access to the validation failure tree for the latest validation call.
-        Uses `sys.last_value()`, so it must be called immediately after the error occurred.
+        Uses :py:obj:`sys.last_value`, so it must be called immediately after the error occurred.
 
-        ```py
-        Python 3.9.7
         >>> from typing_validation import validate, latest_validation_failure
         >>> validate([[0, 1], [1, 2], [2, "hi"]], list[list[int]])
         TypeError: ...
@@ -157,7 +159,7 @@ def latest_validation_failure() -> Optional[ValidationFailure]:
         ValidationFailure([[0, 1], [1, 2], [2, 'hi']], list[list[int]],
             ValidationFailure([2, 'hi'], list[int],
                 ValidationFailure('hi', <class 'int'>)))
-        ```
+
     """
     try:
         err = sys.last_value # pylint: disable = no-member

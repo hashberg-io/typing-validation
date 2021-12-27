@@ -1,6 +1,8 @@
 """
-    Type validation function.
+    Core type validation functionality.
 """
+
+from __future__ import annotations
 
 import collections
 import collections.abc as collections_abc
@@ -82,7 +84,7 @@ def _type_error(val: Any, t: Any, *causes: TypeError, is_union: bool = False) ->
     """
         Type error arising from `val` not being an instance of type `t`.
         If other type errors are passed as causes, their error messages are indented and included.
-        A `validation_failure` attribute of type ValidationFailure is set for the error,
+        A :func:`validation_failure` attribute of type ValidationFailure is set for the error,
         including full information about the chain of validation failures.
     """
     _causes: typing.Tuple[ValidationFailure, ...] = tuple(
@@ -96,15 +98,15 @@ def _type_error(val: Any, t: Any, *causes: TypeError, is_union: bool = False) ->
     return error
 
 def _missing_args_msg(t: Any) -> str:
-    """ Error message for missing `__args__` attribute on a type `t`. """
+    """ Error message for missing :attr:`__args__` attribute on a type `t`. """
     return f"For type {repr(t)}, expected '__args__' attribute." # pragma: nocover
 
 def _wrong_args_num_msg(t: Any, num_args: int) -> str:
-    """ Error message for incorrect number of `__args__` on a type `t`. """
+    """ Error message for incorrect number of :attr:`__args__` on a type `t`. """
     return f"For type {repr(t)}, expected '__args__' to be tuple with {num_args} elements." # pragma: nocover
 
 def _validate_type(val: Any, t: type) -> None:
-    """ Basic validation using `isinstance` """
+    """ Basic validation using :func:`isinstance` """
     if not isinstance(val, t):
         raise _type_error(val, t)
 
@@ -202,17 +204,47 @@ def _validate_literal(val: Any, t: Any) -> None:
     if val not in t.__args__:
         raise _type_error(val, t)
 
+# def _validate_callable(val: Any, t: Any) -> None:
+#     """
+#         Callable validation
+#     """
+#     assert hasattr(t, "__args__"), _missing_args_msg(t)
+#     assert isinstance(t.__args__, tuple), f"For type {repr(t)}, expected '__args__' to be a tuple."
+#     if not callable(val):
+#         raise _type_error(val, t, is_union=True)
+#     if not t.__args__:
+#         return
+#     exp_params = t.__args__[:-1]
+#     exp_ret = t.__args__[-1]
+#     sig = inspect.signature(val)
+#     empty = sig.empty
+#     params = sig.parameters
+#     ret = sig.return_annotation
+#     positional_only: typing.List[inspect.Parameter] = []
+#     positional_or_keyword: typing.Dict[str, inspect.Parameter] = {}
+#     var_positional: Optional[inspect.Parameter] = None
+#     keyword_only: typing.Dict[str, inspect.Parameter] = {}
+#     var_keyword: Optional[inspect.Parameter] = None
+#     for param_name, param in params.items():
+#         if param.kind == param.POSITIONAL_ONLY:
+#             positional_only.append(param)
+#         elif param.kind == param.POSITIONAL_OR_KEYWORD:
+#             positional_or_keyword[param_name] = param
+#         elif param.kind == param.VAR_POSITIONAL:
+#             var_positional = param
+#         elif param.kind == param.KEYWORD_ONLY:
+#             keyword_only[param_name] = param
+#         elif param.kind == param.VAR_KEYWORD:
+#             var_keyword = param
+#     # TODO: work in progress
+#     raise _type_error(val, t, is_union=True)
+
 def validate(val: Any, t: Any) -> None:
     """
         Performs runtime type-checking for the value `val` against type `t`.
-        Raises `TypeError` if `val` is not of type `t`.
-        Raises `ValueError` if validation for type `t` is not supported.
-        Raises `AssertionError` if things go unexpectedly wrong with `__args__` for parametric types.
 
         For structured types, the error message keeps track of the chain of validation failures, e.g.
 
-        ```py
-        Python 3.9.7
         >>> from typing import *
         >>> from typing_validation import validate
         >>> validate([[0, 1, 2], {"hi": 0}], list[Union[Collection[int], dict[str, str]]])
@@ -223,7 +255,15 @@ def validate(val: Any, t: Any) -> None:
               For type <class 'int'>, invalid value: 'hi'
             Detailed failures for member type dict[str, str]:
               For type <class 'str'>, invalid value: 0
-        ```
+
+        :param val: the value to be type-checked
+        :type val: :py:obj:`~typing.Any`
+        :param t: the type to type-check against
+        :type t: :py:obj:`~typing.Any`
+        :raises TypeError: if `val` is not of type `t`
+        :raises ValueError: if validation for type `t` is not supported
+        :raises AssertionError: if things go unexpectedly wrong with :attr:`__args__` for parametric types
+
     """
     # pylint: disable = too-many-return-statements, too-many-branches
     if t in _basic_types:
@@ -257,9 +297,15 @@ def validate(val: Any, t: Any) -> None:
         if t.__origin__ == tuple:
             _validate_tuple(val, t)
             return
-        if t.__origin__ in _maybe_collection_origins and isinstance(val, typing.Collection):
-            _validate_collection(val, t)
+        if t.__origin__ in _maybe_collection_origins:
+            if isinstance(val, typing.Collection):
+                _validate_collection(val, t)
+            else:
+                _validate_type(val, t.__origin__)
             return
+        # if t.__origin__ is collections_abc.Callable: # TODO: WIP
+        #     _validate_callable(val, t)
+        #     return
     # The `isinstance(t, type)` case goes after the `hasattr(t, "__origin__")` case:
     # e.g. `isinstance(list[int], type)` in 3.10, but we want to validate `list[int]`
     # as a parametric type, not merely as `list` (which is what `_validate_type` does).
