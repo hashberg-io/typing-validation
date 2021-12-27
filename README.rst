@@ -26,30 +26,20 @@ typing-validation: Validation using Type Hints
     :target: https://github.com/RichardLitt/standard-readme
     :alt: standard-readme compliant
 
+Typing-validation is a small library to perform runtime validation of Python objects using `PEP 484 type hints <https://www.python.org/dev/peps/pep-0484/>`_.
 
-Table of Contents
------------------
+.. contents::
 
-- :ref:`install`
-- :ref:`usage`
-- :ref:`api`
-- [Contributing](#contributing)
-- [License](#license)
-
-
-.. _install:
 
 Install
 -------
 
 You can install the latest release from PyPI as follows:
 
-.. code-block:: console
+.. code-block::
 
-    $ pip install --upgrade typing-validation
+    pip install --upgrade typing-validation
 
-
-.. _usage:
 
 Usage
 -----
@@ -76,25 +66,19 @@ TypeError: For type list[int], invalid value: [0, 1, 'hi']
   For type <class 'int'>, invalid value: 'hi'
 
 
-.. _api:
-
 API
 ---
 
 For the full API documentation, see 
 
 
-.. _contributing:
-
 Contributing
 ------------
 
-Please see :doc:`CONTRIBUTING.md`.
+Please see `<CONTRIBUTING.md>`_.
 
-
-.. _contributing:
 
 License
 -------
 
-MIT © Hashberg Ltd. See :doc:`LICENSE`.
+`MIT © Hashberg Ltd. <LICENSE>`_
