@@ -15,7 +15,6 @@
 # import sys
 # sys.path.insert(0, os.path.abspath('.'))
 import sphinx_rtd_theme # type: ignore
-import typing_validation
 
 # -- Project information -----------------------------------------------------
 
@@ -29,9 +28,9 @@ author = 'Hashberg'
 # built documents.
 #
 # The full version, including alpha/beta/rc tags.
-release = typing_validation.__version__
+release = "0.0.1"
 # The short X.Y version.
-version = ".".join(release.split(".")[:2])
+version = "0.0.1"
 
 
 # -- General configuration ---------------------------------------------------
