@@ -17,6 +17,10 @@ typing-validation: Validation using Type Hints
 .. image:: http://www.mypy-lang.org/static/mypy_badge.svg
     :target: https://github.com/python/mypy
     :alt: Checked with Mypy
+    
+.. image:: https://readthedocs.org/projects/typing-validation/badge/?version=latest
+    :target: https://typing-validation.readthedocs.io/en/latest/?badge=latest
+    :alt: Documentation Status
 
 .. image:: https://github.com/hashberg-io/typing-validation/actions/workflows/python-pytest.yml/badge.svg
     :target: https://github.com/hashberg-io/typing-validation/actions/workflows/python-pytest.yml
