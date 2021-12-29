@@ -13,7 +13,7 @@ def _indent(msg: str) -> str:
     ind = " "*2
     return ind+msg.replace("\n", "\n"+ind)
 
-Acc = typing.TypeVar("Acc")
+_Acc = typing.TypeVar("_Acc")
 
 class ValidationFailure:
     """
@@ -50,7 +50,11 @@ class ValidationFailure:
 
     @property
     def causes(self) -> typing.Tuple["ValidationFailure", ...]:
-        """ Validation failure that in turn caused this failure (if any). """
+        r"""
+            Validation failure that in turn caused this failure (if any).
+
+            :rtype: :obj:`~typing.Tyuple`\ [:class:`ValidationFailure`, ...]
+        """
         return self._causes
 
     @property
@@ -58,7 +62,7 @@ class ValidationFailure:
         """ Whether this validation failure concerns a union type. """
         return self._is_union
 
-    def visit(self, fun: Callable[[Any, Any, Acc], Acc], acc: Acc) -> None:
+    def visit(self, fun: Callable[[Any, Any, _Acc], _Acc], acc: _Acc) -> None:
         r"""
             Performs a pre-order visit of the validation failure tree:
 
