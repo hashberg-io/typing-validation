@@ -1,14 +1,5 @@
 """
-    Top-level imports for this module:
-
-    - module :mod:`typing_validation.validation`
-
-        - function :func:`~typing_validation.validation.validate`
-
-    - module :mod:`typing_validation.validation_failure`
-
-        - function :func:`~typing_validation.validation_failure.get_validation_failure`
-        - function :func:`~typing_validation.validation_failure.latest_validation_failure`
+    Runtime validation using type hints.
 """
 
 __version__ = "0.0.1"

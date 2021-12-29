@@ -38,7 +38,7 @@ Typing-validation is a small library to perform runtime validation of Python obj
 Install
 -------
 
-You can install the latest release from PyPI as follows:
+You can install the latest release from `PyPI <https://pypi.org/project/multiformats/>`_ as follows:
 
 .. code-block::
 
@@ -73,7 +73,7 @@ TypeError: For type list[int], invalid value: [0, 1, 'hi']
 API
 ---
 
-For the full API documentation, see 
+For the full API documentation, see https://typing-validation.readthedocs.io/
 
 
 Contributing

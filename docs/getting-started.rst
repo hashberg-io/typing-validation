@@ -55,3 +55,5 @@ For type typing.Union[typing.Collection[int], dict[str, str]], invalid value: {'
 
 >>> import sys
 >>> sys.tracebacklimit = 0
+
+GitHub repo: https://github.com/hashberg-io/typing-validation

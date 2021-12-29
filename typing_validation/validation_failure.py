@@ -13,8 +13,7 @@ def _indent(msg: str) -> str:
     ind = " "*2
     return ind+msg.replace("\n", "\n"+ind)
 
-_Acc = typing.TypeVar("_Acc")
-_T = typing.TypeVar("_T", bound="ValidationFailure")
+Acc = typing.TypeVar("Acc")
 
 class ValidationFailure:
     """
@@ -26,11 +25,11 @@ class ValidationFailure:
     _causes: typing.Tuple["ValidationFailure", ...]
     _is_union: bool
 
-    def __new__(cls: typing.Type[_T],
+    def __new__(cls,
                 val: Any, t: Any,
                 *causes: "ValidationFailure",
-                is_union: bool = False) -> _T:
-        instance: _T = super().__new__(cls)
+                is_union: bool = False) -> "ValidationFailure":
+        instance: ValidationFailure = super().__new__(cls)
         instance._val = val
         instance._t = t
         instance._causes = causes
@@ -59,8 +58,8 @@ class ValidationFailure:
         """ Whether this validation failure concerns a union type. """
         return self._is_union
 
-    def visit(self, fun: Callable[[Any, Any, _Acc], _Acc], acc: _Acc) -> None:
-        """
+    def visit(self, fun: Callable[[Any, Any, Acc], Acc], acc: Acc) -> None:
+        r"""
             Performs a pre-order visit of the validation failure tree:
 
             1. applies ``fun(self.val, self.t, acc)`` to the failure,
@@ -91,8 +90,9 @@ class ValidationFailure:
 
 
             :param fun: the function that will be called on each element of the failure tree during the visit
-            :type fun: :py:obj:`~typing.Callable`
+            :type fun: :obj:`~typing.Callable`\ [[:obj:`~typing.Any`, :obj:`~typing.Any`, ``Acc``], ``Acc``]
             :param acc: the initial value for the accumulator
+            :type acc: any type ``Acc``
         """
         new_acc = fun(self.val, self.t, acc)
         for cause in self.causes:
@@ -135,7 +135,7 @@ def get_validation_failure(err: TypeError) -> Optional[ValidationFailure]:
                 ValidationFailure('hi', <class 'int'>)))
 
         :param err: type error raised by :func:`~typing_validation.validation.validate`
-        :type err: :py:obj:`TypeError`
+        :type err: :obj:`TypeError`
 
     """
     if not isinstance(err, TypeError):
@@ -150,7 +150,7 @@ def get_validation_failure(err: TypeError) -> Optional[ValidationFailure]:
 def latest_validation_failure() -> Optional[ValidationFailure]:
     """
         Programmatic access to the validation failure tree for the latest validation call.
-        Uses :py:obj:`sys.last_value`, so it must be called immediately after the error occurred.
+        Uses :obj:`sys.last_value`, so it must be called immediately after the error occurred.
 
         >>> from typing_validation import validate, latest_validation_failure
         >>> validate([[0, 1], [1, 2], [2, "hi"]], list[list[int]])

@@ -2,20 +2,10 @@
 typing-validation: Validation using Type Hints
 ==============================================
 
-.. image:: https://img.shields.io/badge/python-3.7+-green.svg
-    :target: https://docs.python.org/3.7/
-    :alt: Python versions
-
-.. image:: https://img.shields.io/pypi/v/typing-validation.svg
-    :target: https://pypi.python.org/pypi/typing-validation/
-    :alt: PyPI version
-
-.. image:: https://img.shields.io/pypi/status/typing-validation.svg
-    :target: https://pypi.python.org/pypi/typing-validation/
-    :alt: PyPI status
-
-
 Typing-validation is a small library to perform runtime validation of Python objects using `PEP 484 type hints <https://www.python.org/dev/peps/pep-0484/>`_.
+
+GitHub repo: https://github.com/hashberg-io/typing-validation
+
 If ``val`` is a value of type ``t``, the call ``validate(val, t)`` raises no error:
 
 >>> from typing_validation import validate
@@ -36,12 +26,12 @@ For type typing.Union[typing.Collection[int], dict[str, str]], invalid value: {'
 
 
 .. toctree::
-    :maxdepth: 2
+    :maxdepth: 3
     :caption: Contents:
 
     getting-started
-    api
 
+.. include:: api-toc.rst
 
 Indices and tables
 ==================

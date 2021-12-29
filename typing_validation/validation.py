@@ -257,9 +257,9 @@ def validate(val: Any, t: Any) -> None:
               For type <class 'str'>, invalid value: 0
 
         :param val: the value to be type-checked
-        :type val: :py:obj:`~typing.Any`
+        :type val: :obj:`~typing.Any`
         :param t: the type to type-check against
-        :type t: :py:obj:`~typing.Any`
+        :type t: :obj:`~typing.Any`
         :raises TypeError: if `val` is not of type `t`
         :raises ValueError: if validation for type `t` is not supported
         :raises AssertionError: if things go unexpectedly wrong with :attr:`__args__` for parametric types
