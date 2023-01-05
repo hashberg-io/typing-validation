@@ -17,6 +17,244 @@ if sys.version_info[1] >= 8:
 else:
     from typing_extensions import Literal
 
+if sys.version_info[1] >= 9:
+    TypeConstructorArgs = Union[
+        typing.Tuple[Literal["none"], None],
+        typing.Tuple[Literal["any"], None],
+        typing.Tuple[Literal["type"], type],
+        typing.Tuple[Literal["type"], typing.Tuple[type, Literal["tuple"], Optional[int]]],
+        typing.Tuple[Literal["type"], typing.Tuple[type, Literal["mapping"], None]],
+        typing.Tuple[Literal["type"], typing.Tuple[type, Literal["collection"], None]],
+        typing.Tuple[Literal["literal"], typing.Tuple[Any, ...]],
+        typing.Tuple[Literal["collection"], None],
+        typing.Tuple[Literal["mapping"], None],
+        typing.Tuple[Literal["union"], int],
+        typing.Tuple[Literal["tuple"], Optional[int]],
+        typing.Tuple[Literal["unsupported"], Any],
+    ]
+else:
+    TypeConstructorArgs = typing.Tuple[str, Any]
+
+class UnsupportedType(type):
+    r"""
+        Wrapper for an unsupported type encountered by a :class:`TypeInspector` instance during validation.
+    """
+
+    def __class_getitem__(cls, wrapped_type: Any) -> "UnsupportedType":
+        wrapper = type.__new__(cls, f"{cls.__name__}[{wrapped_type}]", tuple(), {})
+        wrapper._wrapped_type = wrapped_type
+        return wrapper
+
+    _wrapped_type: Any
+
+    @property
+    def wrapped_type(cls) -> Any:
+        r""" The underlying type. """
+        return cls._wrapped_type
+
+class TypeInspector:
+    r"""
+        Class used to record the structure of a type during a call to :func:`can_validate`.
+    """
+
+    _recorded_constructors: typing.List[TypeConstructorArgs]
+    _unsupported_type_encountered: bool
+    _pending_generic_type_constr: Optional[TypeConstructorArgs]
+
+    __slots__ = ("__weakref__", "_recorded_constructors", "_unsupported_type_encountered", "_pending_generic_type_constr")
+
+    def __new__(cls) -> "TypeInspector":
+        instance = super().__new__(cls)
+        instance._recorded_constructors = []
+        instance._unsupported_type_encountered = False
+        instance._pending_generic_type_constr = None
+        if sys.version_info[1] >= 9:
+            return instance
+        return typing.cast(TypeInspector, instance)
+
+    @property
+    def recorded_type(self) -> Any:
+        r""" The type recorded by this type inspector during validation. """
+        t, idx = self._recorded_type(0)
+        assert idx == len(self._recorded_constructors)-1, f"The following recorded types have not been included: {self._recorded_constructors[idx+1:]}"
+        return t
+
+    def _recorded_type(self, idx: int) -> typing.Tuple[Any, int]:
+        # pylint: disable = too-many-return-statements, too-many-branches
+        param: Any
+        tag, param = self._recorded_constructors[idx]
+        if tag == "unsupported":
+            return UnsupportedType[param], idx # type: ignore[index]
+        if tag == "none":
+            return None, idx
+        if tag == "any":
+            return Any, idx
+        if tag == "literal":
+            assert isinstance(param, tuple)
+            return Literal.__getitem__(Literal, *param), idx
+        if tag == "union":
+            assert isinstance(param, int)
+            member_ts: typing.List[Any] = []
+            for _ in range(param):
+                member_t, idx = self._recorded_type(idx+1)
+                member_ts.append(member_t)
+            return typing.Union.__getitem__(tuple(member_ts)), idx
+        pending_type = None
+        if tag == "type":
+            if isinstance(param, type):
+                return param, idx
+            pending_type, tag, param = param
+        if tag == "collection":
+            item_t, idx = self._recorded_type(idx+1)
+            t = pending_type[item_t] if pending_type is not None else typing.Collection[item_t] # type: ignore[valid-type]
+            return t, idx
+        if tag == "mapping":
+            key_t, idx = self._recorded_type(idx+1)
+            value_t, idx = self._recorded_type(idx+1)
+            t = pending_type[key_t, value_t] if pending_type is not None else typing.Mapping[key_t, value_t] # type: ignore[valid-type]
+            return t, idx
+        if tag == "tuple":
+            if param is None:
+                item_t, idx = self._recorded_type(idx+1)
+                t = pending_type[item_t,...] if pending_type is not None else typing.Tuple[item_t,...]
+                return t, idx
+            assert isinstance(param, int)
+            item_ts: typing.List[Any] = []
+            for _ in range(param):
+                item_t, idx = self._recorded_type(idx+1)
+                item_ts.append(item_t)
+            if not item_ts:
+                item_ts = [tuple()]
+            t = pending_type.__class_getitem__(tuple(item_ts)) if pending_type is not None else typing.Tuple.__getitem__(tuple(item_ts))
+            return t, idx
+        assert False, f"Invalid type constructor tag: {repr(tag)}"
+
+    def _append_constructor_args(self, args: TypeConstructorArgs) -> None:
+        pending_generic_type_constr = self._pending_generic_type_constr
+        if pending_generic_type_constr is None:
+            self._recorded_constructors.append(args)
+            return
+        pending_tag, pending_param = pending_generic_type_constr
+        args_tag, args_param = args
+        assert pending_tag == "type" and isinstance(pending_param, type)
+        assert args_tag in ("tuple", "mapping", "collection"), f"Found unexpected tag '{args_tag}' with type constructor {pending_generic_type_constr} pending."
+        if sys.version_info[1] >= 9:
+            self._recorded_constructors.append(typing.cast(TypeConstructorArgs, ("type", (pending_param, args_tag, args_param))))
+        else:
+            self._recorded_constructors.append(("type", (pending_param, args_tag, args_param)))
+        self._pending_generic_type_constr = None
+
+    def _record_none(self) -> None:
+        self._append_constructor_args(("none", None))
+
+    def _record_any(self) -> None:
+        self._append_constructor_args(("any", None))
+
+    def _record_type(self, t: type) -> None:
+        self._append_constructor_args(("type", t))
+
+    def _record_pending_type_generic(self, t: type) -> None:
+        assert self._pending_generic_type_constr is None
+        self._pending_generic_type_constr = ("type", t)
+
+    def _record_collection(self, item_t: Any) -> None:
+        self._append_constructor_args(("collection", None))
+
+    def _record_mapping(self, key_t: Any, value_t: Any) -> None:
+        self._append_constructor_args(("mapping", None))
+
+    def _record_union(self, *member_ts: Any) -> None:
+        self._append_constructor_args(("union", len(member_ts)))
+
+    def _record_variadic_tuple(self, item_t: Any) -> None:
+        self._append_constructor_args(("tuple", None))
+
+    def _record_fixed_tuple(self, *item_ts: Any) -> None:
+        self._append_constructor_args(("tuple", len(item_ts)))
+
+    def _record_literal(self, *literals: Any) -> None:
+        self._append_constructor_args(("literal", literals))
+
+    def _record_unsupported_type(self, unsupported_t: Any) -> None:
+        self._pending_generic_type_constr = None
+        self._unsupported_type_encountered = True
+        self._append_constructor_args(("unsupported", unsupported_t))
+
+    def __bool__(self) -> bool:
+        return not self._unsupported_type_encountered
+
+    def __repr__(self) -> str:
+        addr = "0x"+f"{id(self):x}"
+        header = f"TypeInspector at {addr} recorded the following type:"
+        return header+"\n"+"\n".join(self._repr()[0])
+
+    def _repr(self, idx: int = 0, level: int = 0) -> typing.Tuple[typing.List[str], int]:
+        # pylint: disable = too-many-return-statements, too-many-branches, too-many-statements
+        indent = "    "*level
+        param: Any
+        lines: typing.List[str]
+        tag, param = self._recorded_constructors[idx]
+        if tag == "unsupported":
+            return [indent+"UnsupportedType[", indent+"    "+str(param), indent+"]"], idx
+        if tag == "none":
+            return [indent+"NoneType"], idx
+        if tag == "any":
+            return [indent+"Any"], idx
+        if tag == "literal":
+            assert isinstance(param, tuple)
+            return [indent+f"Literal[{', '.join(repr(p) for p in param)}]"], idx
+        if tag == "union":
+            assert isinstance(param, int)
+            lines = [indent+"Union["]
+            for _ in range(param):
+                member_lines, idx = self._repr(idx+1, level+1)
+                member_lines[-1] += ","
+                lines.extend(member_lines)
+            assert len(lines) > 1, "Cannot take a union of no types."
+            lines.append(indent+"]")
+            return lines, idx
+        pending_type = None
+        if tag == "type":
+            if isinstance(param, type):
+                return [indent+param.__name__], idx
+            pending_type, tag, param = param
+        if tag == "collection":
+            item_lines, idx = self._repr(idx+1, level+1)
+            if pending_type is not None:
+                lines = [indent+f"{pending_type.__name__}[", *item_lines, indent+"]"]
+            else:
+                lines = [indent+"Collection[", *item_lines, indent+"]"]
+            return lines, idx
+        if tag == "mapping":
+            key_lines, idx = self._repr(idx+1, level+1)
+            key_lines[-1] += ","
+            value_lines, idx = self._repr(idx+1, level+1)
+            if pending_type is not None:
+                lines = [indent+f"{pending_type.__name__}[", *key_lines, *value_lines, indent+"]"]
+            else:
+                lines = [indent+"Mapping[", *key_lines, *value_lines, indent+"]"]
+            return lines, idx
+        if tag == "tuple":
+            if param is None:
+                item_lines, idx = self._repr(idx+1, level+1)
+                if pending_type is not None:
+                    lines = [indent+f"{pending_type.__name__}[", *item_lines, indent+"]"]
+                else:
+                    lines = [indent+"Tuple[", *item_lines, indent+"]"]
+                return lines, idx
+            assert isinstance(param, int)
+            lines = [indent+f"{pending_type.__name__}[" if pending_type is not None else indent+"Tuple["]
+            for _ in range(param):
+                item_lines, idx = self._repr(idx+1, level+1)
+                item_lines[-1] += ","
+                lines.extend(item_lines)
+            if len(lines) == 1:
+                lines.append("tuple()")
+            lines.append(indent+"]")
+            return lines, idx
+        assert False, f"Invalid type constructor tag: {repr(tag)}"
+
+
 # constant for the type of None
 _NoneType = type(None)
 
@@ -82,7 +320,8 @@ _origins = (_collection_origins|_maybe_collection_origins|_mapping_origins|_tupl
 
 def _type_error(val: Any, t: Any, *causes: TypeError, is_union: bool = False) -> TypeError:
     """
-        Type error arising from `val` not being an instance of type `t`.
+        Type error arising from ``val`` not being an instance of type ``t``.
+
         If other type errors are passed as causes, their error messages are indented and included.
         A :func:`validation_failure` attribute of type ValidationFailure is set for the error,
         including full information about the chain of validation failures.
@@ -98,15 +337,18 @@ def _type_error(val: Any, t: Any, *causes: TypeError, is_union: bool = False) ->
     return error
 
 def _missing_args_msg(t: Any) -> str:
-    """ Error message for missing :attr:`__args__` attribute on a type `t`. """
+    """ Error message for missing :attr:`__args__` attribute on a type ``t``. """
     return f"For type {repr(t)}, expected '__args__' attribute." # pragma: nocover
 
 def _wrong_args_num_msg(t: Any, num_args: int) -> str:
-    """ Error message for incorrect number of :attr:`__args__` on a type `t`. """
+    """ Error message for incorrect number of :attr:`__args__` on a type ``t``. """
     return f"For type {repr(t)}, expected '__args__' to be tuple with {num_args} elements." # pragma: nocover
 
 def _validate_type(val: Any, t: type) -> None:
     """ Basic validation using :func:`isinstance` """
+    if isinstance(val, TypeInspector):
+        val._record_type(t)
+        return
     if not isinstance(val, t):
         raise _type_error(val, t)
 
@@ -115,6 +357,10 @@ def _validate_collection(val: Any, t: Any) -> None:
     assert hasattr(t, "__args__"), _missing_args_msg(t)
     assert isinstance(t.__args__, tuple) and len(t.__args__) == 1, _wrong_args_num_msg(t, 1)
     item_t = t.__args__[0]
+    if isinstance(val, TypeInspector):
+        val._record_collection(item_t)
+        validate(val, item_t)
+        return
     item_error: Optional[TypeError] = None
     for item in val:
         try:
@@ -130,6 +376,11 @@ def _validate_mapping(val: Any, t: Any) -> None:
     assert hasattr(t, "__args__"), _missing_args_msg(t)
     assert isinstance(t.__args__, tuple) and len(t.__args__) == 2, _wrong_args_num_msg(t, 2)
     key_t, value_t = t.__args__
+    if isinstance(val, TypeInspector):
+        val._record_mapping(key_t, value_t)
+        validate(val, key_t)
+        validate(val, value_t)
+        return
     item_error: Optional[TypeError] = None
     for key, value in val.items():
         try:
@@ -155,6 +406,10 @@ def _validate_tuple(val: Any, t: Any) -> None:
     if ... in t.__args__: # variadic tuple
         assert len(t.__args__) == 2, _wrong_args_num_msg(t, 2)
         item_t = t.__args__[0]
+        if isinstance(val, TypeInspector):
+            val._record_variadic_tuple(item_t)
+            validate(val, item_t)
+            return
         for item in val:
             try:
                 validate(item, item_t)
@@ -162,6 +417,11 @@ def _validate_tuple(val: Any, t: Any) -> None:
                 item_error = e
                 break
     else: # fixed-length tuple
+        if isinstance(val, TypeInspector):
+            val._record_fixed_tuple(*t.__args__)
+            for item_t in t.__args__:
+                validate(val, item_t)
+            return
         if len(val) != len(t.__args__):
             raise _type_error(val, t)
         for item_t, item in zip(t.__args__, val):
@@ -175,15 +435,20 @@ def _validate_tuple(val: Any, t: Any) -> None:
 
 def _validate_union(val: Any, t: Any) -> None:
     """
-        Union type validation. Each type `u` listed in the union type `t` is checked:
+        Union type validation. Each type ``u`` listed in the union type ``t`` is checked:
 
-        - if `val` is an instance of `t`, returns immediately without error
-        - otherwise, moves to the next `u`
+        - if ``val`` is an instance of ``t``, returns immediately without error
+        - otherwise, moves to the next ``u``
 
-        If `val` is not an instance of any of the types listed in the union, type error is raised.
+        If ``val`` is not an instance of any of the types listed in the union, type error is raised.
     """
     assert hasattr(t, "__args__"), _missing_args_msg(t)
     assert isinstance(t.__args__, tuple), f"For type {repr(t)}, expected '__args__' to be a tuple."
+    if isinstance(val, TypeInspector):
+        val._record_union(*t.__args__)
+        for member_t in t.__args__:
+            validate(val, member_t)
+        return
     if not t.__args__:
         return
     member_errors: typing.List[TypeError] = []
@@ -201,6 +466,9 @@ def _validate_literal(val: Any, t: Any) -> None:
     """
     assert hasattr(t, "__args__"), _missing_args_msg(t)
     assert isinstance(t.__args__, tuple), f"For type {repr(t)}, expected '__args__' to be a tuple."
+    if isinstance(val, TypeInspector):
+        val._record_literal(*t.__args__)
+        return
     if val not in t.__args__:
         raise _type_error(val, t)
 
@@ -241,7 +509,7 @@ def _validate_literal(val: Any, t: Any) -> None:
 
 def validate(val: Any, t: Any) -> None:
     """
-        Performs runtime type-checking for the value `val` against type `t`.
+        Performs runtime type-checking for the value ``val`` against type ``t``.
 
         For structured types, the error message keeps track of the chain of validation failures, e.g.
 
@@ -256,12 +524,14 @@ def validate(val: Any, t: Any) -> None:
             Detailed failures for member type dict[str, str]:
               For type <class 'str'>, invalid value: 0
 
+        **Note.** For Python 3.7 and 3.8, use :obj:`~typing.Dict` and :obj:`~typing.List` instead of :obj:`dict` and :obj:`list` for the above examples.
+
         :param val: the value to be type-checked
         :type val: :obj:`~typing.Any`
         :param t: the type to type-check against
         :type t: :obj:`~typing.Any`
-        :raises TypeError: if `val` is not of type `t`
-        :raises ValueError: if validation for type `t` is not supported
+        :raises TypeError: if ``val`` is not of type ``t``
+        :raises ValueError: if validation for type ``t`` is not supported
         :raises AssertionError: if things go unexpectedly wrong with :attr:`__args__` for parametric types
 
     """
@@ -271,6 +541,9 @@ def validate(val: Any, t: Any) -> None:
         _validate_type(val, t)
         return
     if t is None or t is _NoneType:
+        if isinstance(val, TypeInspector):
+            val._record_none()
+            return
         if val is not None:
             raise _type_error(val, t)
         return
@@ -278,6 +551,9 @@ def validate(val: Any, t: Any) -> None:
         _validate_type(val, t)
         return
     if t is Any:
+        if isinstance(val, TypeInspector):
+            val._record_any()
+            return
         return
     if hasattr(t, "__origin__"): # parametric types
         if t.__origin__ is Union:
@@ -287,7 +563,10 @@ def validate(val: Any, t: Any) -> None:
             _validate_literal(val, t)
             return
         if t.__origin__ in _origins:
-            _validate_type(val, t.__origin__)
+            if isinstance(val, TypeInspector):
+                val._record_pending_type_generic(t.__origin__)
+            else:
+                _validate_type(val, t.__origin__)
         if t.__origin__ in _collection_origins:
             _validate_collection(val, t)
             return
@@ -297,19 +576,69 @@ def validate(val: Any, t: Any) -> None:
         if t.__origin__ == tuple:
             _validate_tuple(val, t)
             return
-        if t.__origin__ in _maybe_collection_origins:
-            if isinstance(val, typing.Collection):
-                _validate_collection(val, t)
-            else:
-                _validate_type(val, t.__origin__)
+        if t.__origin__ in _maybe_collection_origins and isinstance(val, typing.Collection):
+            _validate_collection(val, t)
             return
-        # if t.__origin__ is collections_abc.Callable: # TODO: WIP
+        # TODO: work in progress
+        # if t.__origin__ is collections_abc.Callable:
         #     _validate_callable(val, t)
         #     return
-    # The `isinstance(t, type)` case goes after the `hasattr(t, "__origin__")` case:
-    # e.g. `isinstance(list[int], type)` in 3.10, but we want to validate `list[int]`
-    # as a parametric type, not merely as `list` (which is what `_validate_type` does).
-    if isinstance(t, type):
-        _validate_type(val, t)
+    else:
+        # The `isinstance(t, type)` case goes after the `hasattr(t, "__origin__")` case:
+        # e.g. `isinstance(list[int], type)` in 3.10, but we want to validate `list[int]`
+        # as a parametric type, not merely as `list` (which is what `_validate_type` does).
+        if isinstance(t, type):
+            _validate_type(val, t)
+            return
+    if isinstance(val, TypeInspector):
+        val._record_unsupported_type(t)
         return
     raise ValueError(f"Unsupported validation for type {repr(t)}") # pragma: nocover
+
+def can_validate(t: Any) -> TypeInspector:
+    r"""
+        Checks whether validation is supported for the given type ``t``: if not, :func:`validate` will raise :obj:`ValueError`.
+
+        The returned :class:`TypeInspector` instance can be used wherever a boolean is expected, and will indicate whether the type is supported or not:
+
+        >>> from typing import *
+        >>> from typing_validation import can_validate
+        >>> res = can_validate(tuple[list[str], Union[int, float, Callable[[int], int]]])
+        >>> bool(res)
+        False
+
+        However, it also records (with minimal added cost) the full structure of the type as the latter was validated, which it then exposes via its
+        :attr:`TypeInspector.recorded_type` property:
+
+        >>> res = can_validate(tuple[list[Union[str, int]],...])
+        >>> bool(res)
+        True
+        >>> res.recorded_type
+        tuple[list[typing.Union[str, int]], ...]
+
+        Any unsupported subtype encountered during the validation is left in place, wrapped into an :class:`UnsupportedType`:
+
+        >>> can_validate(tuple[list[str], Union[int, float, Callable[[int], int]]])
+        TypeInspector at 0x000002764984BA80 recorded the following type:
+        tuple[
+            list[
+                str
+            ],
+            Union[
+                int,
+                float,
+                UnsupportedType[
+                    typing.Callable[[int], int]
+                ],
+            ],
+        ]
+
+        **Note.** For Python 3.7 and 3.8, use :obj:`~typing.Tuple` and :obj:`~typing.List` instead of :obj:`tuple` and :obj:`list` for the above examples.
+
+        :param t: the type to be checked for validation support
+        :type t: :obj:`~typing.Any`
+        :raises AssertionError: if things go unexpectedly wrong with :attr:`__args__` for parametric types
+    """
+    inspector = TypeInspector()
+    validate(inspector, t)
+    return inspector

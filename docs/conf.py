@@ -19,7 +19,7 @@ import sphinx_rtd_theme # type: ignore
 # -- Project information -----------------------------------------------------
 
 project = 'typing-validation'
-copyright = '2021, Hashberg'
+copyright = '2023, Hashberg'
 author = 'Hashberg'
 
 
@@ -28,9 +28,9 @@ author = 'Hashberg'
 # built documents.
 #
 # The full version, including alpha/beta/rc tags.
-release = "0.0.1"
+release = "0.0.2"
 # The short X.Y version.
-version = "0.0.1"
+version = "0.0.2"
 
 
 # -- General configuration ---------------------------------------------------

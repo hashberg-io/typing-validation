@@ -51,7 +51,43 @@ For type typing.Union[typing.Collection[int], dict[str, str]], invalid value: {'
   Detailed failures for member type dict[str, str]:
     For type <class 'str'>, invalid value: 0
 
+Detailed information about types supported by :func:`~typing_validation.validation.validate` is provided by
+the :func:`~typing_validation.validation.can_validate` function:
+
+>>> from typing_validation import can_validate
+
+The :func:`~typing_validation.validation.can_validate` function is invoked with a type as its argument and it returns a
+:class:`~typing_validation.validation.TypeInspector` object, containing detailed information about the structure of the type that was being validated,
+including the presence of types not supported by :func:`~typing_validation.validation.validate` (wrapped into a
+:class:`~typing_validation.validation.UnsupportedType`):
+
+>>> from typing import *
+>>> from typing_validation import can_validate
+>>> can_validate(tuple[list[str], Union[int, float, Callable[[int], int]]])
+TypeInspector at 0x000002764984BA80 recorded the following type:
+tuple[
+    list[
+        str
+    ],
+    Union[
+        int,
+        float,
+        UnsupportedType[
+            typing.Callable[[int], int]
+        ],
+    ],
+]
+
+The result of :func:`~typing_validation.validation.can_validate` can be used wherever a :obj:`bool` is expected, returning :obj:`True` upon (implicit or
+explicit) :obj:`bool` conversion if and only if the type can be validated:
+
+>>> bool(can_validate(Callable[[int], int]))
+False
+>>> "can validate" if can_validate(Callable[[int], int]) else "cannot validate"
+'cannot validate'
+
 **Note.** Traceback information was hidden in the above examples, for clarity:
+**Note.** For Python 3.7 and 3.8, use :obj:`~typing.Tuple` and :obj:`~typing.List` instead of :obj:`tuple` and :obj:`list` for the above examples.
 
 >>> import sys
 >>> sys.tracebacklimit = 0

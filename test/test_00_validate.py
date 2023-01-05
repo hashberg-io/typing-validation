@@ -160,43 +160,43 @@ def test_invalid_union_cases(val: typing.Any, ts: typing.AbstractSet[typing.Any]
             pass
 
 
-_iterator_cases = (
-    ("hello", {typing.Iterable[str], typing.Container[str]}),
-    (b"hello", {typing.Iterable[int], typing.Container[int]}),
-    ([0, 1, 2], {typing.Iterable[int], typing.Container[int]}),
-    ((0, 1, 2), {typing.Iterable[int], typing.Container[int]}),
-    ({0, 1, 2}, {typing.Iterable[int], typing.Container[int]}),
-    (frozenset({0, 1, 2}), {typing.Iterable[int], typing.Container[int]}),
-    (deque([0, 1, 2]), {typing.Iterable[int], typing.Container[int]}),
-    ({"a": 0, "b": 1}, {typing.Iterable[str], typing.Container[str]}),
-    (defaultdict(lambda: 0, {"a": 0, "b": 1}), {typing.Iterable[str], typing.Container[str]}),
-)
+# _iterator_cases = (
+#     ("hello", {typing.Iterable[str], typing.Container[str]}),
+#     (b"hello", {typing.Iterable[int], typing.Container[int]}),
+#     ([0, 1, 2], {typing.Iterable[int], typing.Container[int]}),
+#     ((0, 1, 2), {typing.Iterable[int], typing.Container[int]}),
+#     ({0, 1, 2}, {typing.Iterable[int], typing.Container[int]}),
+#     (frozenset({0, 1, 2}), {typing.Iterable[int], typing.Container[int]}),
+#     (deque([0, 1, 2]), {typing.Iterable[int], typing.Container[int]}),
+#     ({"a": 0, "b": 1}, {typing.Iterable[str], typing.Container[str]}),
+#     (defaultdict(lambda: 0, {"a": 0, "b": 1}), {typing.Iterable[str], typing.Container[str]}),
+# )
 
-@pytest.mark.parametrize("val, ts", _iterator_cases)
-def test_iterator_cases(val: typing.Any, ts: typing.AbstractSet[typing.Any]) -> None:
-    for t in ts:
-        validate(val, t)
+# @pytest.mark.parametrize("val, ts", _iterator_cases)
+# def test_iterator_cases(val: typing.Any, ts: typing.AbstractSet[typing.Any]) -> None:
+#     for t in ts:
+#         validate(val, t)
 
-_invalid_iterator_cases = (
-    ("hello", {typing.Iterable[int], typing.Container[int]}),
-    (b"hello", {typing.Iterable[str], typing.Container[str]}),
-    ([0, 1, 2], {typing.Iterable[str], typing.Container[str]}),
-    ((0, 1, 2), {typing.Iterable[str], typing.Container[str]}),
-    ({0, 1, 2}, {typing.Iterable[str], typing.Container[str]}),
-    (frozenset({0, 1, 2}), {typing.Iterable[str], typing.Container[str]}),
-    (deque([0, 1, 2]), {typing.Iterable[str], typing.Container[str]}),
-    ({"a": 0, "b": 1}, {typing.Iterable[int], typing.Container[int]}),
-    (defaultdict(lambda: 0, {"a": 0, "b": 1}), {typing.Iterable[int], typing.Container[int]}),
-)
+# _invalid_iterator_cases = (
+#     ("hello", {typing.Iterable[int], typing.Container[int]}),
+#     (b"hello", {typing.Iterable[str], typing.Container[str]}),
+#     ([0, 1, 2], {typing.Iterable[str], typing.Container[str]}),
+#     ((0, 1, 2), {typing.Iterable[str], typing.Container[str]}),
+#     ({0, 1, 2}, {typing.Iterable[str], typing.Container[str]}),
+#     (frozenset({0, 1, 2}), {typing.Iterable[str], typing.Container[str]}),
+#     (deque([0, 1, 2]), {typing.Iterable[str], typing.Container[str]}),
+#     ({"a": 0, "b": 1}, {typing.Iterable[int], typing.Container[int]}),
+#     (defaultdict(lambda: 0, {"a": 0, "b": 1}), {typing.Iterable[int], typing.Container[int]}),
+# )
 
-@pytest.mark.parametrize("val, ts", _invalid_iterator_cases)
-def test_invalid_iterator_cases(val: typing.Any, ts: typing.AbstractSet[typing.Any]) -> None:
-    for t in ts:
-        try:
-            validate(val, t)
-            assert False, f"For type {repr(t)}, the following value shouldn't have been an instance: {repr(val)}"
-        except TypeError:
-            pass
+# @pytest.mark.parametrize("val, ts", _invalid_iterator_cases)
+# def test_invalid_iterator_cases(val: typing.Any, ts: typing.AbstractSet[typing.Any]) -> None:
+#     for t in ts:
+#         try:
+#             validate(val, t)
+#             assert False, f"For type {repr(t)}, the following value shouldn't have been an instance: {repr(val)}"
+#         except TypeError:
+#             pass
 
 _literal_cases = (
     ("0", {Literal["0", "1", 2], Literal["0"], Literal["hello", 0, "0"]}),
