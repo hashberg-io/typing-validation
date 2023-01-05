@@ -68,9 +68,10 @@ class TypeInspector:
         instance._recorded_constructors = []
         instance._unsupported_type_encountered = False
         instance._pending_generic_type_constr = None
-        if sys.version_info[1] >= 9:
+        if sys.version_info[1] >= 9: # pylint: disable = no-else-return
             return instance
-        return typing.cast(TypeInspector, instance)
+        else:
+            return typing.cast(TypeInspector, instance)
 
     @property
     def recorded_type(self) -> Any:
