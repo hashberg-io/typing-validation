@@ -55,8 +55,8 @@ def validation_aliases(**aliases: Any) -> collections_abc.Iterator[None]:
     r"""
         Sets type aliases that can be used to resolve forward references in :func:`validate`.
 
-        For example, the following snippet validates a value against a recursive type alias for JSON objects, using :func:`validation_aliases` to create a
-        context where :func:`validate` internally evaluates the forward reference `"JSON"` to the type alias `JSON`:
+        For example, the following snippet validates a value against a recursive type alias for JSON-like objects, using :func:`validation_aliases` to create a
+        context where :func:`validate` internally evaluates the forward reference ``"JSON"`` to the type alias ``JSON``:
 
         >>> JSON = Union[int, float, bool, None, str, list["JSON"], dict[str, "JSON"]]
         >>> with validation_aliases(JSON=JSON):

@@ -8,10 +8,13 @@ import inspect
 import json
 import os
 import pkgutil
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import sys
 
-from typing_validation import validate
+# from typing_validation import validate
+# we cannot import typing_validation to build the docs of typing_validation...
+def validate(val: Any, t: Any) -> None:
+    ...
 
 def _list_package_contents(pkg_name: str) -> List[str]:
     modules = [pkg_name]

@@ -1,6 +1,6 @@
 {
     "pkg_name": "typing_validation",
-    "pkg_path": "..",
+    "pkg_path": "../",
     "apidocs_folder": "api",
     "toc_filename": "api-toc.rst",
     "include_members": {},

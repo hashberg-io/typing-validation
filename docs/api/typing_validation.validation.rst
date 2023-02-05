@@ -20,7 +20,22 @@ can_validate
 
 .. autofunction:: typing_validation.validation.can_validate
 
+iskeyword
+---------
+
+.. autodata:: typing_validation.validation.iskeyword
+
+issoftkeyword
+-------------
+
+.. autodata:: typing_validation.validation.issoftkeyword
+
 validate
 --------
 
 .. autofunction:: typing_validation.validation.validate
+
+validation_aliases
+------------------
+
+.. autofunction:: typing_validation.validation.validation_aliases

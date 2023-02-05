@@ -78,6 +78,18 @@ tuple[
     ],
 ]
 
+The :func:`~typing_validation.validation.validation_aliases` can be used to define set simple type aliases that can be used by
+:func:`~typing_validation.validation.validate` to resolve forward references.
+For example, the following snippet validates a value against a recursive type alias for JSON-like objects, using :func:`validation_aliases` to create a
+context where :func:`validate` internally evaluates the forward reference ``"JSON"`` to the type alias ``JSON``:
+
+>>> from typing import *
+>>> from typing_validation import validate, validation_aliases
+>>> JSON = Union[int, float, bool, None, str, list["JSON"], dict[str, "JSON"]]
+>>> with validation_aliases(JSON=JSON):
+>>>     validate([1, 2.2, {"a": ["Hello", None, {"b": True}]}], list["JSON"])
+
+
 The result of :func:`~typing_validation.validation.can_validate` can be used wherever a :obj:`bool` is expected, returning :obj:`True` upon (implicit or
 explicit) :obj:`bool` conversion if and only if the type can be validated:
 
