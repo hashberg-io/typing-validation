@@ -4,7 +4,9 @@
     "apidocs_folder": "api",
     "toc_filename": "api-toc.rst",
     "include_members": {},
-    "exclude_members": {},
+    "exclude_members": {
+        "typing_validation.validation": ["iskeyword", "issoftkeyword"]
+    },
     "include_modules": [],
     "exclude_modules": []
 }
