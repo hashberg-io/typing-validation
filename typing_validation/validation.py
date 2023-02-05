@@ -4,18 +4,27 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import collections
 import collections.abc as collections_abc
 import sys
 import typing
-from typing import Any, Optional, Union
+from typing import Any, ForwardRef, Optional, Union
 
 from .validation_failure import ValidationFailure
 
 if sys.version_info[1] >= 8:
-    from typing import Literal
+    from typing import Literal, Protocol
 else:
-    from typing_extensions import Literal
+    from typing_extensions import Literal, Protocol
+
+if sys.version_info[1] >= 9:
+    from keyword import iskeyword, issoftkeyword
+else:
+    from keyword import iskeyword
+    def issoftkeyword(s: str) -> bool:
+        r""" Dummy implementation for issoftkeyword in Python 3.7 and 3.8. """
+        return s == "_"
 
 if sys.version_info[1] >= 9:
     TypeConstructorArgs = Union[
@@ -30,18 +39,47 @@ if sys.version_info[1] >= 9:
         typing.Tuple[Literal["mapping"], None],
         typing.Tuple[Literal["union"], int],
         typing.Tuple[Literal["tuple"], Optional[int]],
+        typing.Tuple[Literal["alias"], str],
         typing.Tuple[Literal["unsupported"], Any],
     ]
 else:
     TypeConstructorArgs = typing.Tuple[str, Any]
+
+_validation_aliases: typing.Dict[str, Any] = {}
+r"""
+    Current context of type aliases, used to resolve forward references to type aliases in :func:`validate`.
+"""
+
+@contextmanager
+def validation_aliases(**aliases: Any) -> collections_abc.Iterator[None]:
+    r"""
+        Sets type aliases that can be used to resolve forward references in :func:`validate`.
+
+        For example, the following snippet validates a value against a recursive type alias for JSON objects, using :func:`validation_aliases` to create a
+        context where :func:`validate` internally evaluates the forward reference `"JSON"` to the type alias `JSON`:
+
+        >>> JSON = Union[int, float, bool, None, str, list["JSON"], dict[str, "JSON"]]
+        >>> with validation_aliases(JSON=JSON):
+        >>>     validate([1, 2.2, {"a": ["Hello", None, {"b": True}]}], list["JSON"])
+
+    """
+    # pylint: disable = global-statement
+    global _validation_aliases
+    outer_validation_aliases = _validation_aliases
+    _validation_aliases = {**_validation_aliases}
+    _validation_aliases.update(aliases)
+    try:
+        yield
+    finally:
+        _validation_aliases = outer_validation_aliases
 
 class UnsupportedType(type):
     r"""
         Wrapper for an unsupported type encountered by a :class:`TypeInspector` instance during validation.
     """
 
-    def __class_getitem__(cls, wrapped_type: Any) -> "UnsupportedType":
-        wrapper = type.__new__(cls, f"{cls.__name__}[{wrapped_type}]", tuple(), {})
+    def __class_getitem__(mcs, wrapped_type: Any) -> "UnsupportedType":
+        wrapper = type.__new__(mcs, f"{mcs.__name__}[{wrapped_type}]", tuple(), {})
         wrapper._wrapped_type = wrapped_type
         return wrapper
 
@@ -58,15 +96,15 @@ class TypeInspector:
     """
 
     _recorded_constructors: typing.List[TypeConstructorArgs]
-    _unsupported_type_encountered: bool
+    _unsupported_types: typing.List[Any]
     _pending_generic_type_constr: Optional[TypeConstructorArgs]
 
-    __slots__ = ("__weakref__", "_recorded_constructors", "_unsupported_type_encountered", "_pending_generic_type_constr")
+    __slots__ = ("__weakref__", "_recorded_constructors", "_unsupported_types", "_pending_generic_type_constr")
 
     def __new__(cls) -> "TypeInspector":
         instance = super().__new__(cls)
         instance._recorded_constructors = []
-        instance._unsupported_type_encountered = False
+        instance._unsupported_types = []
         instance._pending_generic_type_constr = None
         return instance
 
@@ -76,6 +114,11 @@ class TypeInspector:
         t, idx = self._recorded_type(0)
         assert idx == len(self._recorded_constructors)-1, f"The following recorded types have not been included: {self._recorded_constructors[idx+1:]}"
         return t
+
+    @property
+    def unsupported_types(self) -> typing.Tuple[Any, ...]:
+        r""" The sequence of unsupported types encountered during validation. """
+        return tuple(self._unsupported_types)
 
     def _recorded_type(self, idx: int) -> typing.Tuple[Any, int]:
         # pylint: disable = too-many-return-statements, too-many-branches
@@ -87,9 +130,11 @@ class TypeInspector:
             return None, idx
         if tag == "any":
             return Any, idx
+        if tag == "alias":
+            return param, idx
         if tag == "literal":
             assert isinstance(param, tuple)
-            return Literal.__getitem__(Literal, *param), idx
+            return Literal.__getitem__(Literal, *param), idx # pylint: disable = unnecessary-dunder-call
         if tag == "union":
             assert isinstance(param, int)
             member_ts: typing.List[Any] = []
@@ -173,17 +218,20 @@ class TypeInspector:
     def _record_literal(self, *literals: Any) -> None:
         self._append_constructor_args(("literal", literals))
 
+    def _record_alias(self, t_alias: str) -> None:
+        self._append_constructor_args(("alias", t_alias))
+
     def _record_unsupported_type(self, unsupported_t: Any) -> None:
         self._pending_generic_type_constr = None
-        self._unsupported_type_encountered = True
+        self._unsupported_types.append(unsupported_t)
         self._append_constructor_args(("unsupported", unsupported_t))
 
     def __bool__(self) -> bool:
-        return not self._unsupported_type_encountered
+        return not self._unsupported_types
 
     def __repr__(self) -> str:
-        addr = "0x"+f"{id(self):x}"
-        header = f"TypeInspector at {addr} recorded the following type:"
+        # addr = "0x"+f"{id(self):x}"
+        header = f"The following type can{'' if self else 'not'} be validated against:"
         return header+"\n"+"\n".join(self._repr()[0])
 
     def _repr(self, idx: int = 0, level: int = 0) -> typing.Tuple[typing.List[str], int]:
@@ -198,6 +246,8 @@ class TypeInspector:
             return [indent+"NoneType"], idx
         if tag == "any":
             return [indent+"Any"], idx
+        if tag == "alias":
+            return [indent+f"{repr(param)}"], idx
         if tag == "literal":
             assert isinstance(param, tuple)
             return [indent+f"Literal[{', '.join(repr(p) for p in param)}]"], idx
@@ -313,8 +363,8 @@ _pseudotypes_dict: typing.Mapping[Any, Any] = {
     **_mapping_pseudotypes_dict,
     **_other_pseudotypes_dict
 }
-_pseudotypes = (_collection_pseudotypes|_maybe_collection_pseudotypes|_mapping_pseudotypes|_tuple_pseudotypes|_other_pseudotypes)
-_origins = (_collection_origins|_maybe_collection_origins|_mapping_origins|_tuple_origins|_other_origins)
+_pseudotypes = _collection_pseudotypes|_maybe_collection_pseudotypes|_mapping_pseudotypes|_tuple_pseudotypes|_other_pseudotypes
+_origins = _collection_origins|_maybe_collection_origins|_mapping_origins|_tuple_origins|_other_origins
 
 def _type_error(val: Any, t: Any, *causes: TypeError, is_union: bool = False) -> TypeError:
     """
@@ -329,10 +379,20 @@ def _type_error(val: Any, t: Any, *causes: TypeError, is_union: bool = False) ->
         if hasattr(error, "validation_failure")
     )
     assert all(isinstance(cause, ValidationFailure) for cause in _causes)
-    validation_failure = ValidationFailure(val, t, *_causes, is_union=is_union)
+    validation_failure = ValidationFailure(val, t, *_causes, is_union=is_union, type_aliases=_validation_aliases)
     error = TypeError(str(validation_failure))
     setattr(error, "validation_failure", validation_failure)
     return error
+
+def _type_alias_error(t_alias: str, nested_error: TypeError) -> TypeError:
+    """
+        Repackages a validation error as a type alias error.
+    """
+    assert hasattr(nested_error, "validation_failure"), nested_error
+    validation_failure = getattr(nested_error, "validation_failure")
+    assert isinstance(validation_failure, ValidationFailure), validation_failure
+    validation_failure._t = t_alias
+    return nested_error
 
 def _missing_args_msg(t: Any) -> str:
     """ Error message for missing :attr:`__args__` attribute on a type ``t``. """
@@ -470,6 +530,22 @@ def _validate_literal(val: Any, t: Any) -> None:
     if val not in t.__args__:
         raise _type_error(val, t)
 
+def _validate_alias(val: Any, t_alias: str) -> None:
+    r"""
+        Validation of type aliases within the context provided by :func:`validation`
+    """
+    t = _validation_aliases[t_alias]
+    if isinstance(val, TypeInspector):
+        val._record_alias(t_alias)
+        return
+    nested_error: Optional[TypeError] = None
+    try:
+        validate(val, t)
+    except TypeError as e:
+        nested_error = e
+    if nested_error is not None:
+        raise _type_alias_error(t_alias, nested_error)
+
 # def _validate_callable(val: Any, t: Any) -> None:
 #     """
 #         Callable validation
@@ -502,7 +578,7 @@ def _validate_literal(val: Any, t: Any) -> None:
 #             keyword_only[param_name] = param
 #         elif param.kind == param.VAR_KEYWORD:
 #             var_keyword = param
-#     # TODO: work in progress
+#     # still work in progress
 #     raise _type_error(val, t, is_union=True)
 
 def validate(val: Any, t: Any) -> None:
@@ -533,7 +609,8 @@ def validate(val: Any, t: Any) -> None:
         :raises AssertionError: if things go unexpectedly wrong with :attr:`__args__` for parametric types
 
     """
-    # pylint: disable = too-many-return-statements, too-many-branches
+    # pylint: disable = too-many-return-statements, too-many-branches, too-many-statements
+    unsupported_type_error: Optional[ValueError] = None
     if t in _basic_types:
         # speed things up for the likely most common case
         _validate_type(val, t)
@@ -577,21 +654,41 @@ def validate(val: Any, t: Any) -> None:
         if t.__origin__ in _maybe_collection_origins and isinstance(val, typing.Collection):
             _validate_collection(val, t)
             return
-        # TODO: work in progress
-        # if t.__origin__ is collections_abc.Callable:
-        #     _validate_callable(val, t)
-        #     return
-    else:
+    elif isinstance(t, type):
         # The `isinstance(t, type)` case goes after the `hasattr(t, "__origin__")` case:
         # e.g. `isinstance(list[int], type)` in 3.10, but we want to validate `list[int]`
         # as a parametric type, not merely as `list` (which is what `_validate_type` does).
-        if isinstance(t, type):
+        if Protocol in t.__mro__: # type: ignore[comparison-overlap]
+            if hasattr(t, "_is_runtime_protocol") and getattr(t, "_is_runtime_protocol"):
+                _validate_type(val, t)
+                return
+            if isinstance(val, TypeInspector):
+                val._record_unsupported_type(t)
+                return
+            unsupported_type_error = ValueError(f"Unsupported validation for Protocol {repr(t)}, because it is not runtime-checkable.") # pragma: nocover
+        else:
             _validate_type(val, t)
+            return
+    elif isinstance(t, (str, ForwardRef)):
+        if isinstance(t, str):
+            t_alias: str = t
+        else:
+            t_alias = t.__forward_arg__
+        if t_alias not in _validation_aliases:
+            if t_alias.isidentifier() and not iskeyword(t_alias) and not issoftkeyword(t_alias):
+                hint = f"Perhaps set it with validation_aliases({t_alias}=...)?"
+            else:
+                hint = f"Perhaps set it with validation_aliases(**{{'{t_alias}': ...}})?"
+            unsupported_type_error = ValueError(f"Type alias '{t_alias}' is not known. {hint}") # pragma: nocover
+        else:
+            _validate_alias(val, t_alias)
             return
     if isinstance(val, TypeInspector):
         val._record_unsupported_type(t)
         return
-    raise ValueError(f"Unsupported validation for type {repr(t)}") # pragma: nocover
+    if unsupported_type_error is None:
+        unsupported_type_error = ValueError(f"Unsupported validation for type {repr(t)}.") # pragma: nocover
+    raise unsupported_type_error
 
 def can_validate(t: Any) -> TypeInspector:
     r"""
@@ -617,7 +714,7 @@ def can_validate(t: Any) -> TypeInspector:
         Any unsupported subtype encountered during the validation is left in place, wrapped into an :class:`UnsupportedType`:
 
         >>> can_validate(tuple[list[str], Union[int, float, Callable[[int], int]]])
-        TypeInspector at 0x000002764984BA80 recorded the following type:
+        The following type cannot be validated against:
         tuple[
             list[
                 str

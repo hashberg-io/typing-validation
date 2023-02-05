@@ -64,7 +64,7 @@ including the presence of types not supported by :func:`~typing_validation.valid
 >>> from typing import *
 >>> from typing_validation import can_validate
 >>> can_validate(tuple[list[str], Union[int, float, Callable[[int], int]]])
-TypeInspector at 0x000002764984BA80 recorded the following type:
+The following type cannot be validated against:
 tuple[
     list[
         str
