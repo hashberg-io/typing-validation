@@ -13,5 +13,6 @@ disable = too-many-ancestors,
           protected-access,
           useless-import-alias,
           duplicate-code,
+          using-final-decorator-in-unsupported-version,
 [FORMAT]
 max-line-length=160

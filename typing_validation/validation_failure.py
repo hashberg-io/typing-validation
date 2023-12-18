@@ -6,7 +6,13 @@ from __future__ import annotations
 
 import sys
 import typing
-from typing import Any, Callable, List, Mapping, Optional
+from typing import Any, List, Mapping, Optional
+
+if sys.version_info[1] >= 8:
+    from typing import Protocol
+else:
+    from typing_extensions import Protocol
+
 
 def _indent(msg: str) -> str:
     """ Indent a block of text (possibly with newlines) """
@@ -18,7 +24,21 @@ def _type_str(t: Any) -> str:
         return t.__name__
     return str(t)
 
-_Acc = typing.TypeVar("_Acc")
+Acc = typing.TypeVar("Acc")
+"""
+    Type variable for the accumulator in :meth:`ValidationFailure.visit`.
+"""
+
+class FailureTreeVisitor(Protocol[Acc]):
+    """
+        Structural type for visitor functions that can be passed to
+        :meth:`ValidationFailure.visit`.
+    """
+
+    def __call__(self, val: Any, t: Any, acc: Acc) -> Acc:
+        """
+            See :meth:`ValidationFailure.visit` for usage.
+        """
 
 class ValidationFailure:
     """
@@ -27,15 +47,15 @@ class ValidationFailure:
 
     _val: Any
     _t: Any
-    _causes: typing.Tuple["ValidationFailure", ...]
+    _causes: typing.Tuple[ValidationFailure, ...]
     _is_union: bool
     _type_aliases: dict[str, Any]
 
     def __new__(cls,
                 val: Any, t: Any,
-                *causes: "ValidationFailure",
+                *causes: ValidationFailure,
                 is_union: bool = False,
-                type_aliases: Optional[Mapping[str, Any]] = None) -> "ValidationFailure":
+                type_aliases: Optional[Mapping[str, Any]] = None) -> ValidationFailure:
         instance: ValidationFailure = super().__new__(cls)
         instance._val = val
         instance._t = t
@@ -57,11 +77,11 @@ class ValidationFailure:
         return self._t
 
     @property
-    def causes(self) -> typing.Tuple["ValidationFailure", ...]:
+    def causes(self) -> typing.Tuple[ValidationFailure, ...]:
         r"""
             Validation failure that in turn caused this failure (if any).
 
-            :rtype: :obj:`~typing.Tyuple`\ [:class:`ValidationFailure`, ...]
+            :rtype: :obj:`~typing.Tuple`\ [:class:`ValidationFailure`, ...]
         """
         return self._causes
 
@@ -77,7 +97,7 @@ class ValidationFailure:
         """
         return self._type_aliases
 
-    def visit(self, fun: Callable[[Any, Any, _Acc], _Acc], acc: _Acc) -> None:
+    def visit(self, fun: FailureTreeVisitor[Acc], acc: Acc) -> None:
         r"""
             Performs a pre-order visit of the validation failure tree:
 
@@ -143,9 +163,9 @@ class ValidationFailure:
         from rich.tree import Tree
         from rich.text import Text
         failure_tree = Tree("Failure tree")
-        def tree_builder(val: Any, t: Any, tree_tip: Tree) -> Tree:
+        def tree_builder(val: Any, t: Any, acc: Tree) -> Tree:
             label = Text(f"({repr(t)}, {repr(val)})")
-            return tree_tip.add(label) # see https://rich.readthedocs.io/en/latest/tree.html
+            return acc.add(label) # see https://rich.readthedocs.io/en/latest/tree.html
         self.visit(tree_builder, failure_tree)
         rich.print(failure_tree)
 

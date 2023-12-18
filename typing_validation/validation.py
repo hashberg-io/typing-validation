@@ -10,18 +10,14 @@ import collections.abc as collections_abc
 import sys
 import typing
 from typing import Any, ForwardRef, Optional, Union
+import typing_extensions
 
 from .validation_failure import ValidationFailure
 
 if sys.version_info[1] >= 8:
-    from typing import Protocol
+    from typing import Literal, Protocol
 else:
-    from typing_extensions import Protocol
-
-if sys.version_info[1] >= 11:
-    from typing import Literal
-else:
-    from typing_extensions import Literal
+    from typing_extensions import Literal, Protocol
 
 if sys.version_info[1] >= 9:
     from keyword import iskeyword, issoftkeyword
@@ -56,7 +52,7 @@ r"""
 """
 
 @contextmanager
-def validation_aliases(**aliases: Any) -> collections_abc.Iterator[None]:
+def validation_aliases(**aliases: Any) -> collections.abc.Iterator[None]:
     r"""
         Sets type aliases that can be used to resolve forward references in :func:`validate`.
 
@@ -130,7 +126,7 @@ class TypeInspector:
         param: Any
         tag, param = self._recorded_constructors[idx]
         if tag == "unsupported":
-            return UnsupportedType[param], idx # type: ignore[index]
+            return UnsupportedType[param], idx # type: ignore
         if tag == "none":
             return None, idx
         if tag == "any":
@@ -358,6 +354,7 @@ _other_pseudotypes_dict = {
     typing.Sized: collections_abc.Sized,
     typing.ByteString: collections_abc.ByteString,
 }
+
 _other_pseudotypes = frozenset(_other_pseudotypes_dict.keys())|frozenset(_other_pseudotypes_dict.values())
 _other_origins = frozenset(_other_pseudotypes_dict.values())
 
@@ -611,7 +608,7 @@ def validate(val: Any, t: Any) -> None:
         :type t: :obj:`~typing.Any`
         :raises TypeError: if ``val`` is not of type ``t``
         :raises ValueError: if validation for type ``t`` is not supported
-        :raises AssertionError: if things go unexpectedly wrong with :attr:`__args__` for parametric types
+        :raises AssertionError: if things go unexpectedly wrong with ``__args__`` for parametric types
 
     """
     # pylint: disable = too-many-return-statements, too-many-branches, too-many-statements
@@ -639,7 +636,7 @@ def validate(val: Any, t: Any) -> None:
         if t.__origin__ is Union:
             _validate_union(val, t)
             return
-        if t.__origin__ is Literal:
+        if t.__origin__ is Literal or t.__origin__ is typing_extensions.Literal:
             _validate_literal(val, t)
             return
         if t.__origin__ in _origins:
@@ -737,7 +734,7 @@ def can_validate(t: Any) -> TypeInspector:
 
         :param t: the type to be checked for validation support
         :type t: :obj:`~typing.Any`
-        :raises AssertionError: if things go unexpectedly wrong with :attr:`__args__` for parametric types
+        :raises AssertionError: if things go unexpectedly wrong with ``__args__`` for parametric types
     """
     inspector = TypeInspector()
     validate(inspector, t)

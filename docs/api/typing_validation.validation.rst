@@ -7,12 +7,14 @@ TypeInspector
 -------------
 
 .. autoclass:: typing_validation.validation.TypeInspector
+    :show-inheritance:
     :members:
 
 UnsupportedType
 ---------------
 
 .. autoclass:: typing_validation.validation.UnsupportedType
+    :show-inheritance:
     :members:
 
 can_validate

@@ -8,6 +8,7 @@ typing_validation.__all__
 
 The following members were explicitly reexported using ``__all__``:
 
+    - :py:class:`typing_validation.descriptor.Descriptor`
     - :py:class:`typing_validation.validation.TypeInspector`
     - :py:class:`typing_validation.validation.UnsupportedType`
     - :py:func:`typing_validation.validation.can_validate`
