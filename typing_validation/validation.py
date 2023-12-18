@@ -14,9 +14,14 @@ from typing import Any, ForwardRef, Optional, Union
 from .validation_failure import ValidationFailure
 
 if sys.version_info[1] >= 8:
-    from typing import Literal, Protocol
+    from typing import Protocol
 else:
-    from typing_extensions import Literal, Protocol
+    from typing_extensions import Protocol
+
+if sys.version_info[1] >= 11:
+    from typing import Literal
+else:
+    from typing_extensions import Literal
 
 if sys.version_info[1] >= 9:
     from keyword import iskeyword, issoftkeyword
