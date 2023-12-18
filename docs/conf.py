@@ -23,7 +23,7 @@ import sphinx_rtd_theme # type: ignore
 
 # -- Project information -----------------------------------------------------
 
-project = 'pt'
+project = 'typing-validation'
 copyright = '2023, Hashberg'
 author = 'Hashberg'
 
@@ -33,9 +33,9 @@ author = 'Hashberg'
 # built documents.
 #
 # The full version, including alpha/beta/rc tags.
-release = "0.0.0"
+release = "1.1.0"
 # The short X.Y version.
-version = "0.0.0"
+version = "1.1.0"
 
 
 # -- General configuration ---------------------------------------------------
@@ -101,8 +101,7 @@ from sphinx.environment import BuildEnvironment
 from sphinx.addnodes import pending_xref
 from typing import Any
 
-skip_missing_references: set[str] = {
-}
+skip_missing_references: set[str] = set()
 
 def on_missing_reference(app: Sphinx, env: BuildEnvironment, node: pending_xref, contnode: Any) -> Any:
     if node['reftarget'] in skip_missing_references:
