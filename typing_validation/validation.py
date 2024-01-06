@@ -10,7 +10,7 @@ import collections.abc as collections_abc
 from keyword import iskeyword
 import sys
 import typing
-from typing import Any, ForwardRef, Optional, Union
+from typing import Any, ForwardRef, Optional, Union, get_type_hints
 import typing_extensions
 
 from .validation_failure import ValidationFailureAtIdx, ValidationFailureAtKey, MissingKeysValidationFailure, UnionValidationFailure, ValidationFailure
@@ -644,7 +644,7 @@ def _validate_typed_dict(val: Any, t: _TypedDictClass) -> None:
     """
         Validation of :class:`TypedDict` subclasses.
     """
-    annotations = t.__annotations__
+    annotations = get_type_hints(t)
     required_keys = t.__required_keys__
     if isinstance(val, TypeInspector):
         val._record_typed_dict(t)
