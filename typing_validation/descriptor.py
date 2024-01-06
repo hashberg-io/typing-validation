@@ -110,6 +110,7 @@ class Descriptor(Generic[T]):
 
             :meta public:
         """
+        # pylint: disable = too-many-arguments
         if not can_validate(ty):
             raise TypeError(f"Cannot validate type {ty!r}.")
         if validator is not None and not callable(validator):

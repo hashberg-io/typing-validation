@@ -1,24 +1,30 @@
 # pylint: disable = missing-docstring
 
 from collections import deque, defaultdict
+import collections.abc as collections_abc
 import sys
 import typing
 
 import pytest
 
-from typing_validation.validation import (validate, validation_aliases, _pseudotypes, _pseudotypes_dict)
+from typing_validation.validation import (validate, validation_aliases, _pseudotypes, _pseudotypes_dict, _is_typed_dict)
 
 if sys.version_info[1] >= 8:
     from typing import Literal
 else:
     from typing_extensions import Literal
 
+if sys.version_info[1] >= 9:
+    from typing import TypedDict
+else:
+    from typing_extensions import TypedDict
+
 _basic_types = [
     bool, int, float, complex, str, bytes, bytearray,
     list, tuple, set, frozenset, dict, type(None)
 ]
 
-_all_types = _basic_types+list(_pseudotypes) # TODO: make this deterministic by picking a fixed order for pseudotypes
+_all_types = _basic_types+sorted(_pseudotypes, key=repr)
 
 _basic_cases = (
     (True, [bool, int, typing.Hashable]),
@@ -28,13 +34,18 @@ _basic_cases = (
     (None, [None, type(None), typing.Hashable]),
 )
 
-_collection_cases = (
+_collection_cases: typing.Tuple[typing.Tuple[typing.Any, typing.List[typing.Any]], ...] = (
     ("hello", [str, typing.Collection, typing.Collection[str],
                typing.Sequence, typing.Sequence[str],
                typing.Iterable, typing.Sized, typing.Hashable, typing.Container]),
     (b"hello", [bytes, typing.Collection, typing.Collection[int],
-                typing.Sequence, typing.Sequence[int], typing.ByteString,
-                typing.Iterable, typing.Container, typing.Sized, typing.Hashable]),
+                typing.Sequence, typing.Sequence[int], typing.Iterable,
+                typing.Container, typing.Sized, typing.Hashable,
+                *(
+                    [typing.ByteString]
+                    if sys.version_info[1] <= 11
+                    else [typing.cast(typing.Any, collections_abc.Buffer)]
+                )]),
     ([0, 1, 2], [list, typing.List, typing.List[int],
                  typing.Collection, typing.Collection[int],
                  typing.Sequence, typing.Sequence[int],
@@ -136,7 +147,7 @@ def test_specific_invalid_cases(val: typing.Any, ts: typing.List[typing.Any]) ->
             pass
 
 _union_cases = (
-    (0, [typing.Union[int], typing.Union[str, int], typing.Union[int, str], typing.Optional[int]]),
+    (0, [typing.Union[str, int], typing.Union[int, str], typing.Optional[int]]),
     ("hello", [typing.Union[str, int], typing.Union[int, str], typing.Optional[str]]),
 )
 
@@ -215,6 +226,78 @@ def test_invalid_alias_cases(val: typing.Any, ts: typing.List[typing.Any]) -> No
         try:
             with validation_aliases(**_validation_aliases):
                 validate(val, t)
+            assert False, f"For type {repr(t)}, the following value shouldn't have been an instance: {repr(val)}"
+        except TypeError:
+            pass
+
+
+class TD1(TypedDict, total=True):
+    x: int
+    y: float
+
+class TD1a(TD1, total=False):
+    z: typing.List[str]
+
+class TD1b(TD1, total=True):
+    z: typing.List[str]
+class TD2(TypedDict, total=False):
+    x: str
+    w: typing.List[str]
+
+_typed_dict_cases: typing.Dict[typing.Any, typing.List[typing.Any]] = {}
+_typed_dict_cases[TD1b] = [
+        {"x": 1, "y": 1.5, "z": ["hello", "bye bye"]},
+]
+_typed_dict_cases[TD1a] = [
+    *_typed_dict_cases[TD1b],
+    {"x": 1, "y": 1.5},
+]
+_typed_dict_cases[TD1] = [
+    *_typed_dict_cases[TD1a],
+    {"x": 1, "y": 1.5, "z": [0, 1, 2]},
+]
+_typed_dict_cases[TD2] = [
+    {"x": "hello", "w": ["hello", "bye bye"]},
+    {"x": "hello"},
+    {"w": ["hello", "bye bye"]},
+    {},
+]
+
+@pytest.mark.parametrize("t, vals", _typed_dict_cases.items())
+def test_typed_dict_cases(t: typing.Any, vals: typing.List[typing.Any]) -> None:
+    assert _is_typed_dict(t), t
+    for val in vals:
+        validate(val, t)
+
+_invalid_typed_dict_cases: typing.Dict[typing.Any, typing.List[typing.Any]] = {}
+_invalid_typed_dict_cases[TD1] = [
+    {"x": 1, "y": "invalid"},
+    {"x": "invalid", "y": 1.5},
+    {"x": 1},
+    {"y": 1.5},
+    {},
+]
+_invalid_typed_dict_cases[TD1a] = [
+    *_invalid_typed_dict_cases[TD1],
+    {"x": 1, "y": 1.5, "z": [0, 1, 2]},
+]
+_invalid_typed_dict_cases[TD1b] = [
+    *_invalid_typed_dict_cases[TD1a],
+    {"x": 1, "y": 1.5},
+]
+_invalid_typed_dict_cases[TD2] = [
+    {"x": "hello", "w": 0},
+    {"x": 0, "w": ["hello", "bye bye"]},
+    {"w": 0},
+    {"x": 0},
+]
+
+@pytest.mark.parametrize("t, vals", _invalid_typed_dict_cases.items())
+def test_invalid_typed_dict_cases(t: typing.Any, vals: typing.List[typing.Any]) -> None:
+    assert _is_typed_dict(t), t
+    for val in vals:
+        try:
+            validate(val, t)
             assert False, f"For type {repr(t)}, the following value shouldn't have been an instance: {repr(val)}"
         except TypeError:
             pass

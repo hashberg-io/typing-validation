@@ -15,10 +15,38 @@ FailureTreeVisitor
     :show-inheritance:
     :members:
 
+MissingKeysValidationFailure
+----------------------------
+
+.. autoclass:: typing_validation.validation_failure.MissingKeysValidationFailure
+    :show-inheritance:
+    :members:
+
+UnionValidationFailure
+----------------------
+
+.. autoclass:: typing_validation.validation_failure.UnionValidationFailure
+    :show-inheritance:
+    :members:
+
 ValidationFailure
 -----------------
 
 .. autoclass:: typing_validation.validation_failure.ValidationFailure
+    :show-inheritance:
+    :members:
+
+ValidationFailureAtIdx
+----------------------
+
+.. autoclass:: typing_validation.validation_failure.ValidationFailureAtIdx
+    :show-inheritance:
+    :members:
+
+ValidationFailureAtKey
+----------------------
+
+.. autoclass:: typing_validation.validation_failure.ValidationFailureAtKey
     :show-inheritance:
     :members:
 

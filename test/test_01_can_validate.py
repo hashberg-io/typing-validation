@@ -5,7 +5,7 @@ import typing
 import pytest
 
 from typing_validation.validation import (can_validate, validation_aliases, _pseudotypes_dict)
-from .test_00_validate import _test_cases, _union_cases, _literal_cases, _alias_cases, _validation_aliases
+from .test_00_validate import _test_cases, _union_cases, _literal_cases, _alias_cases, _validation_aliases, _typed_dict_cases
 
 @pytest.mark.parametrize("val, ts", _test_cases)
 def test_valid_cases(val: typing.Any, ts: typing.List[typing.Any]) -> None:
@@ -27,3 +27,9 @@ def test_alias_cases(val: typing.Any, ts: typing.List[typing.Any]) -> None:
         with validation_aliases(**_validation_aliases):
             assert can_validate(t), f"Should be able to validate {t}"
             assert can_validate(typing.Optional[t]), f"Should be able to validate {typing.Optional[t]}"
+
+@pytest.mark.parametrize("t, vals", _typed_dict_cases.items())
+def test_typed_dict_cases(t: typing.Any, vals: typing.List[typing.Any]) -> None:
+    with validation_aliases(**_validation_aliases):
+        assert can_validate(t), f"Should be able to validate {t}"
+        assert can_validate(typing.Optional[t]), f"Should be able to validate {typing.Optional[t]}"

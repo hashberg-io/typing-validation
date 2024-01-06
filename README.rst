@@ -17,7 +17,7 @@ typing-validation: Validation using Type Hints
 .. image:: http://www.mypy-lang.org/static/mypy_badge.svg
     :target: https://github.com/python/mypy
     :alt: Checked with Mypy
-    
+
 .. image:: https://readthedocs.org/projects/typing-validation/badge/?version=latest
     :target: https://typing-validation.readthedocs.io/en/latest/?badge=latest
     :alt: Documentation Status
@@ -61,12 +61,14 @@ The `validate` function is invoked with a value and a type as its arguments and 
 If the value is invalid for the given type, the `validate` function raises a `TypeError`:
 
 >>> validate(12, str)
-TypeError: For type <class 'str'>, invalid value: 12
+TypeError: Runtime validation error raised by validate(val, t), details below.
+For type <class 'str'>, invalid value: 12
 
 For nested types (e.g. parametric collection/mapping types), the full chain of validation failures is shown by the type error:
 
 >>> validate([0, 1, "hi"], list[int])
-TypeError: For type list[int], invalid value: [0, 1, 'hi']
+TypeError: Runtime validation error raised by validate(val, t), details below.
+For type list[int], invalid value at idx: 2
   For type <class 'int'>, invalid value: 'hi'
 
 

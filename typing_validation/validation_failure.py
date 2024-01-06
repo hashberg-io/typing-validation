@@ -6,18 +6,38 @@ from __future__ import annotations
 
 import sys
 import typing
-from typing import Any, List, Mapping, Optional
+from typing import Any, Mapping, Optional
 
 if sys.version_info[1] >= 8:
     from typing import Protocol
 else:
     from typing_extensions import Protocol
 
+if sys.version_info[1] >= 9:
+    from collections.abc import Sequence
+else:
+    from typing import Sequence
 
-def _indent(msg: str) -> str:
+if sys.version_info[1] >= 11:
+    from typing import Self
+else:
+    from typing_extensions import Self
+
+
+def _indent(msg: str, level: int = 1, *,
+            allow_newlines: bool = False) -> str:
     """ Indent a block of text (possibly with newlines) """
-    ind = " "*2
-    return ind+msg.replace("\n", "\n"+ind)
+    ind = " "*2*level
+    if allow_newlines:
+        return ind+msg.replace("\n", "\n"+ind)
+    assert "\n" not in msg
+    return ind+msg
+
+def _indent_lines(lines: Sequence[str], level: int = 1) -> list[str]:
+    """ Indent all given blocks of text (no newlines). """
+    assert not any("\n" in line for line in lines)
+    ind = " "*2*level
+    return [ind+line for line in lines]
 
 def _type_str(t: Any) -> str:
     if isinstance(t, type):
@@ -42,28 +62,24 @@ class FailureTreeVisitor(Protocol[Acc]):
 
 class ValidationFailure:
     """
-        Simple container class for validation failures.
+        Generic validation failures.
     """
 
     _val: Any
     _t: Any
     _causes: typing.Tuple[ValidationFailure, ...]
-    _is_union: bool
     _type_aliases: dict[str, Any]
 
     def __new__(cls,
                 val: Any, t: Any,
                 *causes: ValidationFailure,
-                is_union: bool = False,
-                type_aliases: Optional[Mapping[str, Any]] = None) -> ValidationFailure:
-        instance: ValidationFailure = super().__new__(cls)
+                type_aliases: Optional[Mapping[str, Any]] = None,
+               ) -> Self:
+        instance = super().__new__(cls)
         instance._val = val
         instance._t = t
         instance._causes = causes
-        instance._is_union = is_union
         instance._type_aliases = {**type_aliases} if type_aliases is not None else {}
-        if is_union:
-            assert all(cause.val == val for cause in causes)
         return instance
 
     @property
@@ -84,12 +100,6 @@ class ValidationFailure:
             :rtype: :obj:`~typing.Tuple`\ [:class:`ValidationFailure`, ...]
         """
         return self._causes
-
-    @property
-    def is_union(self) -> bool:
-        """ Whether this validation failure concerns a union type. """
-        return self._is_union
-
     @property
     def type_aliases(self) -> Mapping[str, Any]:
         r"""
@@ -147,6 +157,7 @@ class ValidationFailure:
             >>> from typing import Union, Collection
             >>> from typing_validation import validate, latest_validation_failure
             >>> validate([[0, 1, 2], {"hi": 0}], list[Union[Collection[int], dict[str, str]]])
+            TypeError: ...
             >>> latest_validation_failure().rich_print()
             Failure tree
             └── (list[typing.Union[typing.Collection[int], dict[str, str]]], [[0, 1, 2], {'hi': 0}])
@@ -170,26 +181,29 @@ class ValidationFailure:
         rich.print(failure_tree)
 
     def __str__(self) -> str:
-        return self._str(top_level=True)
+        return "\n".join(self._str_lines(top_level=True))
 
     def __repr__(self) -> str:
         causes_str = ""
         if self.causes:
             causes_str = ", "+", ".join(repr(cause) for cause in self.causes)
-        is_union_str = ""
-        if self._is_union:
-            is_union_str = ", is_union=True"
-        return f"ValidationFailure({repr(self.val)}, {repr(self.t)}{causes_str}{is_union_str})"
+        return f"{type(self).__name__}({repr(self.val)}, {repr(self.t)}{causes_str})"
 
-    def _str(self, *, top_level: bool) -> str:
-        # pylint: disable = too-many-branches
-        t = self.t
-        type_descr = "type alias" if isinstance(t, str) else "type"
-        if self.is_union:
-            type_descr = f"union {type_descr}"
+    def _str_type_descr(self, type_quals: tuple[str, ...] = ()) -> str:
+        descr = "type alias" if isinstance(self.t, str) else "type"
+        if type_quals:
+            descr = " ".join(type_quals)+" "+descr
+        return descr
 
+    def _str_main_msg(self, type_quals: tuple[str, ...] = ()) -> str:
+        return f"For {self._str_type_descr(type_quals)} {repr(self.t)}, invalid value: {repr(self.val)}"
+
+    def _str_header_lines(self, top_level: bool) -> list[str]:
         if top_level:
-            lines = ["Runtime validation error raised by validate(val, t), details below."]
+            lines = [
+                "Runtime validation error raised by validate(val, t), "
+                "details below."
+            ]
         else:
             lines = []
         if top_level and self.type_aliases:
@@ -198,33 +212,213 @@ class ValidationFailure:
             for alias, aliased_t in self.type_aliases.items():
                 lines.append(f"    '{alias}': {repr(aliased_t)}")
             lines.append("}")
-        lines.append(f"For {type_descr} {repr(t)}, invalid value: {repr(self.val)}")
-        if self._is_union:
-            leaf_causes: List[ValidationFailure] = []
-            causes_to_expand: List[ValidationFailure] = []
-            for cause in self.causes:
-                if cause.causes:
-                    causes_to_expand.append(cause)
-                else:
-                    leaf_causes.append(cause)
-            if leaf_causes and causes_to_expand:
-                leaf_causes_line = f"Not of the following member types: {', '.join(_type_str(cause.t) for cause in leaf_causes)}."
-                lines.append(_indent(leaf_causes_line))
-            elif leaf_causes:
-                leaf_causes_line = f"Not of any member type: {', '.join(_type_str(cause.t) for cause in leaf_causes)}."
-                lines.append(_indent(leaf_causes_line))
-            elif causes_to_expand:
-                pass
-            else:
-                lines.append("Type union is empty.")
-            for cause in causes_to_expand:
-                lines.append(_indent(f"Not of member type {repr(cause.t)}, details below:"))
-                for sub_cause in cause.causes:
-                    lines.append(_indent(_indent(sub_cause._str(top_level=False))))
+        return lines
+
+    def _str_causes_lines(self) -> list[str]:
+        return [
+            line
+            for cause in self.causes
+            for line in _indent_lines(cause._str_lines(top_level=False))
+        ]
+
+    def _str_lines(self, *,
+                   top_level: bool,
+                   type_quals: tuple[str, ...] = ()) -> list[str]:
+        # pylint: disable = too-many-branches
+        lines = self._str_header_lines(top_level)
+        lines.append(self._str_main_msg(type_quals))
+        lines.extend(self._str_causes_lines())
+        return lines
+
+
+class UnionValidationFailure(ValidationFailure):
+    """
+        Validation failures arising from union types.
+    """
+
+    def __new__(cls,
+                val: Any, t: Any,
+                *causes: ValidationFailure,
+                type_aliases: Optional[Mapping[str, Any]] = None) -> Self:
+        instance = super().__new__(
+            cls,
+            val,
+            t,
+            *causes,
+            type_aliases=type_aliases
+        )
+        assert all(cause.val == val for cause in causes)
+        return instance
+
+    def _str_type_descr(self, type_quals: tuple[str, ...] = ()) -> str:
+        if not type_quals or type_quals[-1] != "union":
+            type_quals += ("union",)
+        return super()._str_type_descr(type_quals)
+
+    def _str_causes_lines(self) -> list[str]:
+        return [
+            line
+            for cause in self.causes
+            for line in _indent_lines(cause._str_lines(top_level=False, type_quals=("member",)))
+        ]
+
+    # def _str_causes_lines(self) -> list[str]:
+        # lines: list[str] = []
+        # leaf_causes: List[ValidationFailure] = []
+        # causes_to_expand: List[ValidationFailure] = []
+        # for cause in self.causes:
+        #     if cause.causes:
+        #         causes_to_expand.append(cause)
+        #     else:
+        #         leaf_causes.append(cause)
+        # if leaf_causes and causes_to_expand:
+        #     leaf_causes_line = f"Not of the following member types: {', '.join(_type_str(cause.t) for cause in leaf_causes)}."
+        #     lines.append(_indent(leaf_causes_line))
+        # elif leaf_causes:
+        #     leaf_causes_line = f"Not of any member type: {', '.join(_type_str(cause.t) for cause in leaf_causes)}."
+        #     lines.append(_indent(leaf_causes_line))
+        # elif causes_to_expand:
+        #     pass
+        # else:
+        #     lines.append("Type union is empty.")
+        # for cause in causes_to_expand:
+        #     lines.append(_indent(f"Not of member type {repr(cause.t)}, details below:"))
+        #     lines.extend(_indent_lines(cause._str_lines(top_level=False), 2))
+        #     # for sub_cause in cause.causes:
+        #     #     lines.extend(_indent_lines(sub_cause._str_lines(top_level=False), 2))
+        # return lines
+
+
+class ValidationFailureAtIdx(ValidationFailure):
+    """
+        Validation failures arising at a given index of a sequence.
+    """
+
+    _idx: int
+    _ordered: bool
+
+    def __new__(cls,
+                val: Any, t: Any,
+                idx_cause: ValidationFailure,
+                idx: int,
+                *,
+                ordered: bool = True,
+                type_aliases: Optional[Mapping[str, Any]] = None) -> Self:
+        # pylint: disable = too-many-arguments
+        if ordered:
+            assert isinstance(val, Sequence)
+        assert idx in range(len(val))
+        instance = super().__new__(
+            cls,
+            val,
+            t,
+            idx_cause,
+            type_aliases=type_aliases
+        )
+        instance._idx = idx
+        instance._ordered = ordered
+        return instance
+
+    @property
+    def idx(self) -> int:
+        """
+            The of the collection item at which this failure arose.
+        """
+        return self._idx
+
+    @property
+    def ordered(self) -> bool:
+        """
+            Whether the collection is ordered.
+            If not, the item :attr:`idx` might not be stable.
+        """
+        return self._ordered
+
+    def _str_main_msg(self, type_quals: tuple[str, ...] = ()) -> str:
+        return (
+            f"For {self._str_type_descr(type_quals)} {repr(self.t)}, "
+            f"invalid value at idx: {self.idx}"
+        )
+
+class ValidationFailureAtKey(ValidationFailure):
+    """
+        Validation failures arising at a given key of a mapping.
+    """
+
+    _key: Any
+
+    def __new__(cls,
+                val: Any, t: Any,
+                key_cause: ValidationFailure,
+                key: Any,
+                *,
+                type_aliases: Optional[Mapping[str, Any]] = None) -> Self:
+        # pylint: disable = too-many-arguments
+        assert isinstance(val, Mapping)
+        assert key in val
+        instance = super().__new__(
+            cls,
+            val,
+            t,
+            key_cause,
+            type_aliases=type_aliases
+        )
+        instance._key = key
+        return instance
+
+    @property
+    def key(self) -> Any:
+        """
+            The key of the outer sequence at which this failure arose.
+        """
+        return self._key
+
+    def _str_main_msg(self, type_quals: tuple[str, ...] = ()) -> str:
+        return (
+            f"For {self._str_type_descr(type_quals)} {repr(self.t)}, "
+            f"invalid value at key: {self.key!r}"
+        )
+
+class MissingKeysValidationFailure(ValidationFailure):
+    """
+        Validation failures arising because of missing required keys
+        in a mapping.
+    """
+
+    _missing_keys: tuple[Any, ...]
+
+    def __new__(cls,
+                val: Any, t: Any,
+                missing_keys: Sequence[Any],
+                *,
+                type_aliases: Optional[Mapping[str, Any]] = None) -> Self:
+        assert isinstance(val, Mapping)
+        assert len(missing_keys) >= 0
+        assert all(k not in val for k in missing_keys)
+        instance = super().__new__(
+            cls, val, t, type_aliases=type_aliases
+        )
+        instance._missing_keys = tuple(missing_keys)
+        return instance
+
+    @property
+    def missing_keys(self) -> tuple[Any, ...]:
+        """
+            The required key(s) missing from the mapping.
+        """
+        return self._missing_keys
+
+    def _str_main_msg(self, type_quals: tuple[str, ...] = ()) -> str:
+        missing_keys = self.missing_keys
+        if len(missing_keys) == 1:
+            keys_repr = f"key: {missing_keys[0]!r}"
         else:
-            for cause in self.causes:
-                lines.append(_indent(cause._str(top_level=False)))
-        return "\n".join(lines)
+            keys_repr = f"keys: {missing_keys!r}"
+        return (
+            f"For {self._str_type_descr(type_quals)} {repr(self.t)}, "
+            f"missing required {keys_repr}"
+        )
+
 
 def get_validation_failure(err: TypeError) -> ValidationFailure:
     """

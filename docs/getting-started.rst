@@ -31,25 +31,27 @@ it returns nothing when the given value is valid for the given type:
 If the value is invalid for the given type, the :func:`~typing_validation.validation.validate` function raises a :exc:`TypeError`:
 
 >>> validate(12, str)
-TypeError: For type <class 'str'>, invalid value: 12
+TypeError: Runtime validation error raised by validate(val, t), details below.
+For type <class 'str'>, invalid value: 12
 
 For nested types (e.g. parametric collection/mapping types), the full chain of validation failures is shown by the type error:
 
 >>> validate([0, 1, "hi"], list[int])
-TypeError: For type list[int], invalid value: [0, 1, 'hi']
-For type <class 'int'>, invalid value: 'hi'
+TypeError: Runtime validation error raised by validate(val, t), details below.
+For type list[int], invalid value at idx: 2
+  For type <class 'int'>, invalid value: 'hi'
 
 For union types, detailed validation failures are shown for individual union member types, where available:
 
 >>> from typing import *
 >>> validate([[0, 1, 2], {"hi": 0}], list[Union[Collection[int], dict[str, str]]])
-TypeError: For type list[typing.Union[typing.Collection[int], dict[str, str]]],
-invalid value: [[0, 1, 2], {'hi': 0}]
-For type typing.Union[typing.Collection[int], dict[str, str]], invalid value: {'hi': 0}
-  Detailed failures for member type typing.Collection[int]:
-    For type <class 'int'>, invalid value: 'hi'
-  Detailed failures for member type dict[str, str]:
-    For type <class 'str'>, invalid value: 0
+TypeError: Runtime validation error raised by validate(val, t), details below.
+For type list[typing.Union[typing.Collection[int], dict[str, str]]], invalid value at idx: 1
+  For union type typing.Union[typing.Collection[int], dict[str, str]], invalid value: {'hi': 0}
+    For member type typing.Collection[int], invalid value at idx: 0
+      For type <class 'int'>, invalid value: 'hi'
+    For member type dict[str, str], invalid value at key: 'hi'
+      For type <class 'str'>, invalid value: 0
 
 Detailed information about types supported by :func:`~typing_validation.validation.validate` is provided by
 the :func:`~typing_validation.validation.can_validate` function:
