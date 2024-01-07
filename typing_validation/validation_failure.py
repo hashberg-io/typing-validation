@@ -24,14 +24,14 @@ else:
     from typing_extensions import Self
 
 
-def _indent(msg: str, level: int = 1, *,
-            allow_newlines: bool = False) -> str:
-    """ Indent a block of text (possibly with newlines) """
-    ind = " "*2*level
-    if allow_newlines:
-        return ind+msg.replace("\n", "\n"+ind)
-    assert "\n" not in msg
-    return ind+msg
+# def _indent(msg: str, level: int = 1, *,
+#             allow_newlines: bool = False) -> str:
+#     """ Indent a block of text (possibly with newlines) """
+#     ind = " "*2*level
+#     if allow_newlines:
+#         return ind+msg.replace("\n", "\n"+ind)
+#     assert "\n" not in msg
+#     return ind+msg
 
 def _indent_lines(lines: Sequence[str], level: int = 1) -> list[str]:
     """ Indent all given blocks of text (no newlines). """

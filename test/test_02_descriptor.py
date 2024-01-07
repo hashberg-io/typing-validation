@@ -1,6 +1,5 @@
 # pylint: disable = missing-docstring
 
-from ast import Attribute
 import sys
 from typing import Any
 

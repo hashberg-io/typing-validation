@@ -3,19 +3,10 @@ typing_validation.validation
 
 .. automodule:: typing_validation.validation
 
-TypeInspector
--------------
+T
+-
 
-.. autoclass:: typing_validation.validation.TypeInspector
-    :show-inheritance:
-    :members:
-
-UnsupportedType
----------------
-
-.. autoclass:: typing_validation.validation.UnsupportedType
-    :show-inheritance:
-    :members:
+.. autodata:: typing_validation.validation.T
 
 can_validate
 ------------
@@ -26,6 +17,16 @@ validate
 --------
 
 .. autofunction:: typing_validation.validation.validate
+
+validated
+---------
+
+.. autofunction:: typing_validation.validation.validated
+
+validated_iter
+--------------
+
+.. autofunction:: typing_validation.validation.validated_iter
 
 validation_aliases
 ------------------

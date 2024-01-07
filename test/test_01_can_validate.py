@@ -4,8 +4,10 @@ from types import NoneType
 import typing
 import pytest
 
-from typing_validation.validation import (can_validate, validation_aliases, _pseudotypes_dict)
-from .test_00_validate import _test_cases, _union_cases, _literal_cases, _alias_cases, _validation_aliases, _typed_dict_cases
+from typing_validation import can_validate, validation_aliases
+from typing_validation.validation import _pseudotypes_dict
+
+from .test_00_validate import _test_cases, _union_cases, _literal_cases, _alias_cases,_typed_dict_cases, _validation_aliases
 
 def assert_recorded_type(t: typing.Any) -> None:
     _t = can_validate(t).recorded_type

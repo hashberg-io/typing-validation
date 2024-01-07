@@ -5,7 +5,9 @@ from __future__ import annotations
 import sys
 import typing
 import pytest
-from typing_validation.validation import (validate, _is_typed_dict)
+
+from typing_validation import validate
+from typing_validation.validation import _is_typed_dict
 
 
 if sys.version_info[1] >= 9:
