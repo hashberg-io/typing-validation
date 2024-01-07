@@ -8,7 +8,7 @@ from typing_validation import can_validate, validation_aliases
 from typing_validation.inspector import _typing_equiv
 from typing_validation.validation import _pseudotypes_dict
 
-from .test_00_validate import _test_cases, _union_cases, _literal_cases, _alias_cases,_typed_dict_cases, _validation_aliases
+from .test_00_validate import _test_cases, _union_cases, _literal_cases, _alias_cases,_typed_dict_cases, _user_class_cases, _validation_aliases
 
 def assert_recorded_type(t: typing.Any) -> None:
     _t = can_validate(t).recorded_type
@@ -74,3 +74,14 @@ def test_typed_dict_cases(t: typing.Any) -> None:
         assert can_validate(typing.Optional[t]), f"Should be able to validate {typing.Optional[t]}"
         str(can_validate(t))
         assert_recorded_type(t)
+
+_user_class_cases_ts = sorted({
+    t for _, ts in _user_class_cases for t in typing.cast(typing.Any, ts)
+}, key=repr)
+
+@pytest.mark.parametrize("t", _user_class_cases_ts)
+def test_user_class_cases(t: typing.Any) -> None:
+    assert can_validate(t), f"Should be able to validate {t}"
+    assert can_validate(typing.Optional[t]), f"Should be able to validate {typing.Optional[t]}"
+    str(can_validate(t))
+    assert_recorded_type(t)

@@ -148,10 +148,17 @@ def test_specific_invalid_cases(val: typing.Any, ts: typing.List[typing.Any]) ->
         except TypeError:
             pass
 
+_union_cases: typing.Tuple[typing.Tuple[typing.Any, typing.List[typing.Any]], ...]
 _union_cases = (
     (0, [typing.Union[str, int], typing.Union[int, str], typing.Optional[int]]),
     ("hello", [typing.Union[str, int], typing.Union[int, str], typing.Optional[str]]),
 )
+
+if sys.version_info[1] >= 10:
+    _union_cases += (
+        (0, [str|int, int|str, int|None]),
+        ("hello", [str|int, int|str, str|None]),
+    )
 
 @pytest.mark.parametrize("val, ts", _union_cases)
 def test_union_cases(val: typing.Any, ts: typing.List[typing.Any]) -> None:
@@ -303,3 +310,29 @@ def test_invalid_typed_dict_cases(t: typing.Any, vals: typing.List[typing.Any]) 
             assert False, f"For type {repr(t)}, the following value shouldn't have been an instance: {repr(val)}"
         except TypeError:
             pass
+
+
+S = typing.TypeVar("S", bound=str)
+T = typing.TypeVar("T")
+U_co = typing.TypeVar("U_co", covariant=True)
+
+class A:
+    ...
+class B(typing.Generic[T]):
+    def __init__(self, t: T) -> None:
+        ...
+
+class C(typing.Generic[S, T, U_co]):
+    def __init__(self, s: S, t: T, u: U_co) -> None:
+        ...
+
+_user_class_cases = (
+    (A(), [A]),
+    (B(10), [B, B[int]]),
+    (C("hello", 20, 30), [C, C[str, int, typing.Union[int, str]]]),
+)
+
+@pytest.mark.parametrize("val, ts", _user_class_cases)
+def test_user_class_cases(val: typing.Any, ts: typing.List[typing.Any]) -> None:
+    for t in ts:
+        validate(val, t)

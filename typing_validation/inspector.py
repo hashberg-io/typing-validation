@@ -39,6 +39,7 @@ if sys.version_info[1] >= 9:
         typing.Tuple[Literal["typed-dict"], type],
         typing.Tuple[Literal["union"], int],
         typing.Tuple[Literal["tuple"], Optional[int]],
+        typing.Tuple[Literal["user-class"], Optional[int]],
         typing.Tuple[Literal["alias"], str],
         typing.Tuple[Literal["unsupported"], Any],
     ]
@@ -180,6 +181,17 @@ class TypeInspector:
                 item_ts = [tuple()]
             t = pending_type[tuple(item_ts)] if pending_type is not None else typing.Tuple[tuple(item_ts)]
             return t, idx
+        if tag == "user-class":
+            assert isinstance(param, int)
+            assert pending_type is not None
+            item_ts = []
+            for _ in range(param):
+                item_t, idx = self._recorded_type(idx+1)
+                item_ts.append(item_t)
+            if not item_ts:
+                item_ts = [tuple()]
+            t = pending_type[tuple(item_ts)]
+            return t, idx
         assert False, f"Invalid type constructor tag: {repr(tag)}"
 
     def _append_constructor_args(self, args: TypeConstructorArgs) -> None:
@@ -190,7 +202,7 @@ class TypeInspector:
         pending_tag, pending_param = pending_generic_type_constr
         args_tag, args_param = args
         assert pending_tag == "type" and isinstance(pending_param, type)
-        assert args_tag in ("tuple", "mapping", "collection"), f"Found unexpected tag '{args_tag}' with type constructor {pending_generic_type_constr} pending."
+        assert args_tag in ("tuple", "mapping", "collection", "user-class"), f"Found unexpected tag '{args_tag}' with type constructor {pending_generic_type_constr} pending."
         if sys.version_info[1] >= 9:
             self._recorded_constructors.append(typing.cast(TypeConstructorArgs, ("type", (pending_param, args_tag, args_param))))
         else:
@@ -227,6 +239,9 @@ class TypeInspector:
 
     def _record_fixed_tuple(self, *item_ts: Any) -> None:
         self._append_constructor_args(("tuple", len(item_ts)))
+
+    def _record_user_class(self, *item_ts: Any) -> None:
+        self._append_constructor_args(("user-class", len(item_ts)))
 
     def _record_literal(self, *literals: Any) -> None:
         self._append_constructor_args(("literal", literals))
@@ -330,6 +345,18 @@ class TypeInspector:
                 return lines, idx
             assert isinstance(param, int)
             lines = [indent+f"{pending_type.__name__}[" if pending_type is not None else indent+"Tuple["]
+            for _ in range(param):
+                item_lines, idx = self._repr(idx+1, level+1)
+                item_lines[-1] += ","
+                lines.extend(item_lines)
+            if len(lines) == 1:
+                lines.append("tuple()")
+            lines.append(indent+"]")
+            return lines, idx
+        if tag == "user-class":
+            assert isinstance(param, int)
+            assert pending_type is not None
+            lines = [indent+f"{pending_type.__name__}["]
             for _ in range(param):
                 item_lines, idx = self._repr(idx+1, level+1)
                 item_lines[-1] += ","

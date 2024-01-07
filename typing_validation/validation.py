@@ -29,9 +29,10 @@ else:
         return s == "_"
 
 if sys.version_info[1] >= 10:
-    from types import NoneType
+    from types import NoneType, UnionType
 else:
     NoneType = type(None)
+    UnionType = None
 
 _validation_aliases: typing.Dict[str, Any] = {}
 r"""
@@ -292,7 +293,7 @@ def _validate_tuple(val: Any, t: Any) -> None:
             except TypeError as e:
                 raise _idx_type_error(val, t, e, idx=idx, ordered=True) from None
 
-def _validate_union(val: Any, t: Any) -> None:
+def _validate_union(val: Any, t: Any, *, union_type: bool = False) -> None:
     """
         Union type validation. Each type ``u`` listed in the union type ``t`` is checked:
 
@@ -387,6 +388,18 @@ def _validate_typed_dict(val: Any, t: type) -> None:
             except TypeError as e:
                 raise _key_type_error(val, t, e, key=k) from None
 
+def _validate_user_class(val: Any, t: Any) -> None:
+    assert hasattr(t, "__args__"), _missing_args_msg(t)
+    assert isinstance(t.__args__, tuple), f"For type {repr(t)}, expected '__args__' to be a tuple."
+    if isinstance(val, TypeInspector):
+        val._record_pending_type_generic(t.__origin__)
+        val._record_user_class(*t.__args__)
+        for arg in t.__args__:
+            validate(val, arg)
+        return
+    _validate_type(val, t.__origin__)
+    # Generic type arguments cannot be validated
+
 # def _validate_callable(val: Any, t: Any) -> None:
 #     """
 #         Callable validation
@@ -471,6 +484,9 @@ def validate(val: Any, t: Any) -> None:
             val._record_any()
             return
         return
+    if UnionType is not None and isinstance(t, UnionType):
+        _validate_union(val, t, union_type=True)
+        return
     if hasattr(t, "__origin__"): # parametric types
         if t.__origin__ is Union:
             _validate_union(val, t)
@@ -483,22 +499,26 @@ def validate(val: Any, t: Any) -> None:
                 val._record_pending_type_generic(t.__origin__)
             else:
                 _validate_type(val, t.__origin__)
-        if t.__origin__ in _collection_origins:
-            ordered = t.__origin__ in _ordered_collection_origins
-            _validate_collection(val, t, ordered)
-            return
-        if t.__origin__ in _mapping_origins:
-            _validate_mapping(val, t)
-            return
-        if t.__origin__ == tuple:
-            _validate_tuple(val, t)
-            return
-        if t.__origin__ in _iterator_origins:
-            if isinstance(val, TypeInspector):
+            if t.__origin__ in _collection_origins:
+                ordered = t.__origin__ in _ordered_collection_origins
+                _validate_collection(val, t, ordered)
+                return
+            if t.__origin__ in _mapping_origins:
+                _validate_mapping(val, t)
+                return
+            if t.__origin__ == tuple:
+                _validate_tuple(val, t)
+                return
+            if t.__origin__ in _iterator_origins:
+                if isinstance(val, TypeInspector):
+                    _validate_collection(val, t, ordered=False)
+                # Item type cannot be validated for iterators (use validated_iter)
+                return
+            if t.__origin__ in _maybe_collection_origins and isinstance(val, typing.Collection):
                 _validate_collection(val, t, ordered=False)
-            return
-        if t.__origin__ in _maybe_collection_origins and isinstance(val, typing.Collection):
-            _validate_collection(val, t, ordered=False)
+                return
+        elif isinstance(t.__origin__, type):
+            _validate_user_class(val, t)
             return
     elif isinstance(t, type):
         # The `isinstance(t, type)` case goes after the `hasattr(t, "__origin__")` case:
