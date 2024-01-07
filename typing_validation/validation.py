@@ -9,7 +9,6 @@ import collections
 import collections.abc as collections_abc
 from keyword import iskeyword
 import sys
-from types import NoneType
 import typing
 from typing import Any, ForwardRef, Optional, Union, get_type_hints
 import typing_extensions
@@ -28,6 +27,11 @@ else:
     def issoftkeyword(s: str) -> bool:
         r""" Dummy implementation for issoftkeyword in Python 3.7 and 3.8. """
         return s == "_"
+
+if sys.version_info[1] >= 10:
+    from types import NoneType
+else:
+    NoneType = type(None)
 
 _validation_aliases: typing.Dict[str, Any] = {}
 r"""

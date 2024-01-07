@@ -5,7 +5,8 @@
 """
 
 from __future__ import annotations
-
+import collections
+import collections.abc as collections_abc
 import sys
 import typing
 from typing import Any, Optional, Union, get_type_hints
@@ -43,6 +44,36 @@ if sys.version_info[1] >= 9:
     ]
 else:
     TypeConstructorArgs = typing.Tuple[str, Any]
+
+_typing_equiv = {
+    list: typing.List,
+    tuple: typing.Tuple,
+    set: typing.Set,
+    frozenset: typing.FrozenSet,
+    dict: typing.Dict,
+    collections.deque: typing.Deque,
+    collections.defaultdict: typing.DefaultDict,
+    collections_abc.Collection: typing.Collection,
+    collections_abc.Set: typing.AbstractSet,
+    collections_abc.MutableSet: typing.MutableSet,
+    collections_abc.Sequence: typing.Sequence,
+    collections_abc.MutableSequence: typing.MutableSequence,
+    collections_abc.Iterable: typing.Iterable,
+    collections_abc.Iterator: typing.Iterator,
+    collections_abc.Container: typing.Container,
+    collections_abc.Mapping: typing.Mapping,
+    collections_abc.MutableMapping: typing.MutableMapping,
+    collections_abc.Hashable: typing.Hashable,
+    collections_abc.Sized: typing.Sized,
+}
+
+if sys.version_info[1] <= 11:
+    _typing_equiv[collections_abc.ByteString] = typing.ByteString # type: ignore
+
+def _to_typing_equiv(t: Any) -> Any:
+    if sys.version_info[1] <= 8 and t in _typing_equiv:
+        return _typing_equiv[t]
+    return t
 
 class UnsupportedType(type):
     r"""
@@ -116,13 +147,16 @@ class TypeInspector:
                 member_ts.append(member_t)
             return typing.Union.__getitem__(tuple(member_ts)), idx
         if tag == "typed-dict":
+            for _ in get_type_hints(param):
+                _, idx = self._recorded_type(idx+1)
             return param, idx
         pending_type = None
         if tag == "type":
             # if isinstance(param, type):
             if not isinstance(param, tuple):
-                return param, idx
+                return _to_typing_equiv(param), idx
             pending_type, tag, param = param
+        pending_type = _to_typing_equiv(pending_type)
         if tag == "collection":
             item_t, idx = self._recorded_type(idx+1)
             t = pending_type[item_t] if pending_type is not None else typing.Collection[item_t] # type: ignore[valid-type]
@@ -144,7 +178,7 @@ class TypeInspector:
                 item_ts.append(item_t)
             if not item_ts:
                 item_ts = [tuple()]
-            t = pending_type.__class_getitem__(tuple(item_ts)) if pending_type is not None else typing.Tuple.__getitem__(tuple(item_ts))
+            t = pending_type[tuple(item_ts)] if pending_type is not None else typing.Tuple[tuple(item_ts)]
             return t, idx
         assert False, f"Invalid type constructor tag: {repr(tag)}"
 
@@ -214,7 +248,7 @@ class TypeInspector:
         return header+"\n"+"\n".join(self._repr()[0])
 
     def _repr(self, idx: int = 0, level: int = 0) -> typing.Tuple[typing.List[str], int]:
-        # pylint: disable = too-many-return-statements, too-many-branches, too-many-statements
+        # pylint: disable = too-many-return-statements, too-many-branches, too-many-statements, too-many-locals
         basic_indent = "    "
         assert len(basic_indent) >= 2
         indent = basic_indent*level
@@ -267,7 +301,8 @@ class TypeInspector:
         if tag == "type":
             # if isinstance(param, type):
             if not isinstance(param, tuple):
-                return [indent+param.__name__], idx
+                param_name = param.__name__ if isinstance(param, type) else str(param)
+                return [indent+param_name], idx
             pending_type, tag, param = param
         if tag == "collection":
             item_lines, idx = self._repr(idx+1, level+1)
