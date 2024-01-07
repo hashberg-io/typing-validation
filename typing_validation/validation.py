@@ -9,6 +9,7 @@ import collections
 import collections.abc as collections_abc
 from keyword import iskeyword
 import sys
+import types
 import typing
 from typing import Any, ForwardRef, Optional, Union, get_type_hints
 import typing_extensions
@@ -162,7 +163,8 @@ class TypeInspector:
             return param, idx
         if tag == "literal":
             assert isinstance(param, tuple)
-            return Literal.__getitem__(Literal, *param), idx # pylint: disable = unnecessary-dunder-call
+            # return Literal.__getitem__(Literal, *param), idx
+            return Literal.__getitem__(param), idx # pylint: disable = unnecessary-dunder-call
         if tag == "union":
             assert isinstance(param, int)
             member_ts: typing.List[Any] = []
@@ -174,7 +176,8 @@ class TypeInspector:
             return param, idx
         pending_type = None
         if tag == "type":
-            if isinstance(param, type):
+            # if isinstance(param, type):
+            if not isinstance(param, tuple):
                 return param, idx
             pending_type, tag, param = param
         if tag == "collection":
@@ -305,7 +308,8 @@ class TypeInspector:
             return lines, idx
         pending_type = None
         if tag == "type":
-            if isinstance(param, type):
+            # if isinstance(param, type):
+            if not isinstance(param, tuple):
                 return [indent+param.__name__], idx
             pending_type, tag, param = param
         if tag == "collection":
@@ -376,7 +380,7 @@ _ordered_collection_pseudotypes_dict = {
 _ordered_collection_pseudotypes = frozenset(_ordered_collection_pseudotypes_dict.keys())|frozenset(_ordered_collection_pseudotypes_dict.values())
 _ordered_collection_origins = frozenset(_ordered_collection_pseudotypes_dict.values())
 
-# types that could might be validated as collections (parametric on item type)
+# types that might be validated as collections (parametric on item type)
 _maybe_collection_pseudotypes_dict = {
     typing.Iterable: collections_abc.Iterable,
     typing.Container: collections_abc.Container,
@@ -412,6 +416,11 @@ else:
 
 _other_pseudotypes = frozenset(_other_pseudotypes_dict.keys())|frozenset(_other_pseudotypes_dict.values())
 _other_origins = frozenset(_other_pseudotypes_dict.values())
+
+_iterator_origins = frozenset([
+    typing.Iterator, collections_abc.Iterator,
+    typing.Iterable, collections_abc.Iterable,
+])
 
 # all types together
 _pseudotypes_dict: typing.Mapping[Any, Any] = {
@@ -774,9 +783,12 @@ def validate(val: Any, t: Any) -> None:
         if t.__origin__ == tuple:
             _validate_tuple(val, t)
             return
+        if t.__origin__ in _iterator_origins:
+            if isinstance(val, TypeInspector):
+                _validate_collection(val, t, ordered=False)
+            return
         if t.__origin__ in _maybe_collection_origins and isinstance(val, typing.Collection):
-            ordered = False
-            _validate_collection(val, t, ordered)
+            _validate_collection(val, t, ordered=False)
             return
     elif isinstance(t, type):
         # The `isinstance(t, type)` case goes after the `hasattr(t, "__origin__")` case:
@@ -864,3 +876,45 @@ def can_validate(t: Any) -> TypeInspector:
     inspector = TypeInspector()
     validate(inspector, t)
     return inspector
+
+T = typing.TypeVar("T")
+"""
+    Invariant type variable used by the functions :func:`validated`
+    and :func:`validated_iter`.
+"""
+
+def validated(val: T, t: Any) -> T:
+    """
+        Performs the same functionality as :func:`validate`, but returns ``val``
+        if validation is successful.
+
+        Useful when multiple elements must be validated as part of a larger
+        expression, e.g. as part of a comprehension:
+
+        ```py
+            def sortint(*items: int) -> list[int]:
+                return sorted(validate(i) for i in items)
+        ```
+
+
+    """
+    validate(val, t)
+    return val
+
+def validated_iter(val: typing.Iterable[T], t: Any) -> typing.Iterable[T]:
+    """
+        Performs the same functionality as :func:`validated`, but the iterable
+        ``var`` is wrapped into an iterator which validates its items prior to
+        them being yielded.
+    """
+    validate(val, t)
+    if t in _iterator_origins:
+        return val
+    if hasattr(t, "__origin__") and t.__origin__ in _iterator_origins:
+        assert hasattr(t, "__args__"), _missing_args_msg(t)
+        assert isinstance(t.__args__, tuple) and len(t.__args__) == 1, _wrong_args_num_msg(t, 1)
+        item_t = t.__args__[0]
+        return (validated(item, item_t) for item in val)
+    raise ValueError(
+        "Argument 't' must be Iterable, Iterator, Iterable[T], or Iterator[T]."
+    )
