@@ -9,6 +9,7 @@ import collections
 import collections.abc as collections_abc
 from keyword import iskeyword
 import sys
+from types import NoneType
 import typing
 from typing import Any, ForwardRef, Optional, Union, get_type_hints
 import typing_extensions
@@ -56,9 +57,6 @@ def validation_aliases(**aliases: Any) -> collections.abc.Iterator[None]:
     finally:
         _validation_aliases = outer_validation_aliases
 
-
-# constant for the type of None
-_NoneType = type(None)
 
 # basic types
 _basic_types = frozenset({bool, int, float, complex, bytes, bytearray, memoryview, str, range, slice})
@@ -454,7 +452,7 @@ def validate(val: Any, t: Any) -> None:
         # speed things up for the likely most common case
         _validate_type(val, t)
         return
-    if t is None or t is _NoneType:
+    if t is None or t is NoneType:
         if isinstance(val, TypeInspector):
             val._record_none()
             return

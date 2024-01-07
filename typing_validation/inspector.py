@@ -215,7 +215,11 @@ class TypeInspector:
 
     def _repr(self, idx: int = 0, level: int = 0) -> typing.Tuple[typing.List[str], int]:
         # pylint: disable = too-many-return-statements, too-many-branches, too-many-statements
-        indent = "    "*level
+        basic_indent = "    "
+        assert len(basic_indent) >= 2
+        indent = basic_indent*level
+        next_indent = basic_indent*(level+1)
+        next_indent_len = len(next_indent)
         param: Any
         lines: typing.List[str]
         tag, param = self._recorded_constructors[idx]
@@ -242,12 +246,22 @@ class TypeInspector:
             return lines, idx
         if tag == "typed-dict":
             t = param
+            required_keys: frozenset[str] = getattr(t, "__required_keys__")
             item_lines_list: list[str] = []
             for k in get_type_hints(t):
                 value_lines, idx = self._repr(idx+1, level+1)
-                value_lines[0] = f"{k}: "+value_lines[0]
+                opt_str = (
+                    basic_indent
+                    if k in required_keys
+                    else basic_indent[:-1]+"?"
+                )
+                value_lines[0] = indent+opt_str+f"{k}: "+value_lines[0][next_indent_len:]
                 item_lines_list.extend(value_lines)
-            lines = [indent+f"{t.__name__}[", *item_lines_list, indent+"]"]
+            lines = [
+                indent+t.__name__+" {",
+                *item_lines_list,
+                indent+"}"
+            ]
             return lines, idx
         pending_type = None
         if tag == "type":
