@@ -38,7 +38,7 @@ Typing-validation is a small library to perform runtime validation of Python obj
 Install
 -------
 
-You can install the latest release from `PyPI <https://pypi.org/project/multiformats/>`_ as follows:
+You can install the latest release from `PyPI <https://pypi.org/project/typing-validation/>`_ as follows:
 
 .. code-block::
 

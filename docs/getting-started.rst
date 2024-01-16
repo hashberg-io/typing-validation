@@ -106,38 +106,4 @@ False
 >>> import sys
 >>> sys.tracebacklimit = 0
 
-Descriptors
------------
-
-The class :class:`~typing_validation.descriptor.Descriptor` can be used to create descriptors with the following features:
-
-- static type checking for the descriptor value;
-- runtime type checking;
-- optional runtime validation;
-- the ability to make the descriptor read-only.
-
-The valida
-
-.. code-block:: python
-
-    from collections.abc import Sequence
-    from typing_validation import Descriptor
-
-    class MyClass:
-
-        x = Descriptor(int, lambda _, x: x >= 0, readonly=True)
-        y = Descriptor(Sequence[int], lambda self, y: len(y) <= self.x)
-
-        def __init__(self, x: int, y: Sequence[int]):
-            self.x = x
-            self.y = y
-
-    myobj = MyClass(3, [0, 2, 5]) # OK
-    myobj.y = (0, 1)              # OK
-    myobj.y = [0, 2, 4, 6]        # ValueError (lenght of y is not <= 3)
-    myobj.x = 5                   # AttributeError (readonly descriptor)
-    myobj.y = 5                   # TypeError (type of y is not 'Sequence')
-    myobj.y = ["hi", "bye"]       # TypeError (type of y is not 'Sequence[int]')
-
-
 GitHub repo: https://github.com/hashberg-io/typing-validation
