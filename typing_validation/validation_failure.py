@@ -33,36 +33,41 @@ else:
 #     assert "\n" not in msg
 #     return ind+msg
 
+
 def _indent_lines(lines: Sequence[str], level: int = 1) -> list[str]:
-    """ Indent all given blocks of text (no newlines). """
+    """Indent all given blocks of text (no newlines)."""
     assert not any("\n" in line for line in lines)
-    ind = " "*2*level
-    return [ind+line for line in lines]
+    ind = " " * 2 * level
+    return [ind + line for line in lines]
+
 
 def _type_str(t: Any) -> str:
     if isinstance(t, type):
         return t.__name__
     return str(t)
 
+
 Acc = typing.TypeVar("Acc")
 """
     Type variable for the accumulator in :meth:`ValidationFailure.visit`.
 """
 
+
 class FailureTreeVisitor(Protocol[Acc]):
     """
-        Structural type for visitor functions that can be passed to
-        :meth:`ValidationFailure.visit`.
+    Structural type for visitor functions that can be passed to
+    :meth:`ValidationFailure.visit`.
     """
 
     def __call__(self, val: Any, t: Any, acc: Acc) -> Acc:
         """
-            See :meth:`ValidationFailure.visit` for usage.
+        See :meth:`ValidationFailure.visit` for usage.
         """
+
 
 class ValidationFailure:
     """
-        Generic validation failures.
+    Generic validation failures.
     """
 
     _val: Any
@@ -70,81 +75,86 @@ class ValidationFailure:
     _causes: typing.Tuple[ValidationFailure, ...]
     _type_aliases: dict[str, Any]
 
-    def __new__(cls,
-                val: Any, t: Any,
-                *causes: ValidationFailure,
-                type_aliases: Optional[Mapping[str, Any]] = None,
-               ) -> Self:
+    def __new__(
+        cls,
+        val: Any,
+        t: Any,
+        *causes: ValidationFailure,
+        type_aliases: Optional[Mapping[str, Any]] = None,
+    ) -> Self:
         instance = super().__new__(cls)
         instance._val = val
         instance._t = t
         instance._causes = causes
-        instance._type_aliases = {**type_aliases} if type_aliases is not None else {}
+        instance._type_aliases = (
+            {**type_aliases} if type_aliases is not None else {}
+        )
         return instance
 
     @property
     def val(self) -> Any:
-        """ The value involved in the validation failure. """
+        """The value involved in the validation failure."""
         return self._val
 
     @property
     def t(self) -> Any:
-        """ The type involved in the validation failure. """
+        """The type involved in the validation failure."""
         return self._t
 
     @property
     def causes(self) -> typing.Tuple[ValidationFailure, ...]:
         r"""
-            Validation failure that in turn caused this failure (if any).
+        Validation failure that in turn caused this failure (if any).
 
-            :rtype: :obj:`~typing.Tuple`\ [:class:`ValidationFailure`, ...]
+        :rtype: :obj:`~typing.Tuple`\ [:class:`ValidationFailure`, ...]
         """
         return self._causes
+
     @property
     def type_aliases(self) -> Mapping[str, Any]:
         r"""
-            The type aliases that were set at the time of validation.
+        The type aliases that were set at the time of validation.
         """
         return self._type_aliases
 
     def visit(self, fun: FailureTreeVisitor[Acc], acc: Acc) -> None:
         r"""
-            Performs a pre-order visit of the validation failure tree:
+        Performs a pre-order visit of the validation failure tree:
 
-            1. applies ``fun(self.val, self.t, acc)`` to the failure,
-            2. saves the return value as ``new_acc``
-            3. recurses on all causes using ``new_acc``.
+        1. applies ``fun(self.val, self.t, acc)`` to the failure,
+        2. saves the return value as ``new_acc``
+        3. recurses on all causes using ``new_acc``.
 
-            For example, this can be used to implement pretty-prenting of validation failures (see :meth:`ValidationFailure.rich_print`):
+        For example, this can be used to implement pretty-prenting of validation failures (see :meth:`ValidationFailure.rich_print`):
 
-            >>> import rich
-            >>> from rich.tree import Tree
-            >>> from rich.text import Text
-            >>> from typing import Any, Collection, Union
-            >>> from typing_validation import validate, latest_validation_failure
-            >>> validate([[0, 1, 2], {"hi": 0}], list[Union[Collection[int], dict[str, str]]])
-            TypeError: ...
-            >>> failure_tree = Tree("Failure tree")
-            >>> def tree_builder(val: Any, t: Any, tree_tip: Tree) -> Tree:
-            ...     label = Text(f"({repr(t)}, {repr(val)})")
-            ...     tree_tip.add(label) # see https://rich.readthedocs.io/en/latest/tree.html
-            ...     return tree_tip
-            ...
-            >>> latest_validation_failure().visit(tree_builder, failure_tree)
-            >>> rich.print(failure_tree)
-            Failure tree
-            └── (list[typing.Union[typing.Collection[int], dict[str, str]]], [[0, 1, 2], {'hi': 0}])
-                └── (typing.Union[typing.Collection[int], dict[str, str]], {'hi': 0})
-                    ├── (typing.Collection[int], {'hi': 0})
-                    │   └── (<class 'int'>, 'hi')
-                    └── (dict[str, str], {'hi': 0})
-                        └── (<class 'str'>, 0)
+        >>> import rich
+        >>> from rich.tree import Tree
+        >>> from rich.text import Text
+        >>> from typing import Any, Collection, Union
+        >>> from typing_validation import validate, latest_validation_failure
+        >>> validate([[0, 1, 2], {"hi": 0}], list[Union[Collection[int], dict[str, str]]])
+        TypeError: ...
+        >>> failure_tree = Tree("Failure tree")
+        >>> def tree_builder(val: Any, t: Any, tree_tip: Tree) -> Tree:
+        ...     label = Text(f"({repr(t)}, {repr(val)})")
+        ...     tree_tip.add(label) # see https://rich.readthedocs.io/en/latest/tree.html
+        ...     return tree_tip
+        ...
+        >>> latest_validation_failure().visit(tree_builder, failure_tree)
+        >>> rich.print(failure_tree)
+        Failure tree
+        └── (list[typing.Union[typing.Collection[int], dict[str, str]]], [[0, 1, 2], {'hi': 0}])
+            └── (typing.Union[typing.Collection[int], dict[str, str]], {'hi': 0})
+                ├── (typing.Collection[int], {'hi': 0})
+                │   └── (<class 'int'>, 'hi')
+                └── (dict[str, str], {'hi': 0})
+                    └── (<class 'str'>, 0)
 
 
-            :param fun: the function that will be called on each element of the failure tree during the visit
-            :type fun: :obj:`~typing.Callable`\ [[:obj:`~typing.Any`, :obj:`~typing.Any`, ``Acc``], ``Acc``]
-            :param acc: the initial value for the accumulator
-            :type acc: any type ``Acc``
+        :param fun: the function that will be called on each element of the failure tree during the visit
+        :type fun: :obj:`~typing.Callable`\ [[:obj:`~typing.Any`, :obj:`~typing.Any`, ``Acc``], ``Acc``]
+        :param acc: the initial value for the accumulator
+        :type acc: any type ``Acc``
         """
         new_acc = fun(self.val, self.t, acc)
         for cause in self.causes:
@@ -152,31 +162,36 @@ class ValidationFailure:
 
     def rich_print(self) -> None:
         r"""
-            Pretty-prints the validation failure tree using `rich <https://github.com/willmcgugan/rich>`_:
+        Pretty-prints the validation failure tree using `rich <https://github.com/willmcgugan/rich>`_:
 
-            >>> from typing import Union, Collection
-            >>> from typing_validation import validate, latest_validation_failure
-            >>> validate([[0, 1, 2], {"hi": 0}], list[Union[Collection[int], dict[str, str]]])
-            TypeError: ...
-            >>> latest_validation_failure().rich_print()
-            Failure tree
-            └── (list[typing.Union[typing.Collection[int], dict[str, str]]], [[0, 1, 2], {'hi': 0}])
-                └── (typing.Union[typing.Collection[int], dict[str, str]], {'hi': 0})
-                    ├── (typing.Collection[int], {'hi': 0})
-                    │   └── (<class 'int'>, 'hi')
-                    └── (dict[str, str], {'hi': 0})
-                        └── (<class 'str'>, 0)
+        >>> from typing import Union, Collection
+        >>> from typing_validation import validate, latest_validation_failure
+        >>> validate([[0, 1, 2], {"hi": 0}], list[Union[Collection[int], dict[str, str]]])
+        TypeError: ...
+        >>> latest_validation_failure().rich_print()
+        Failure tree
+        └── (list[typing.Union[typing.Collection[int], dict[str, str]]], [[0, 1, 2], {'hi': 0}])
+            └── (typing.Union[typing.Collection[int], dict[str, str]], {'hi': 0})
+                ├── (typing.Collection[int], {'hi': 0})
+                │   └── (<class 'int'>, 'hi')
+                └── (dict[str, str], {'hi': 0})
+                    └── (<class 'str'>, 0)
 
-            Raises :obj:`ModuleNotFoundError` if `rich <https://github.com/willmcgugan/rich>`_ is not installed.
+        Raises :obj:`ModuleNotFoundError` if `rich <https://github.com/willmcgugan/rich>`_ is not installed.
         """
         # pylint: disable = import-outside-toplevel
         import rich
         from rich.tree import Tree
         from rich.text import Text
+
         failure_tree = Tree("Failure tree")
+
         def tree_builder(val: Any, t: Any, acc: Tree) -> Tree:
             label = Text(f"({repr(t)}, {repr(val)})")
-            return acc.add(label) # see https://rich.readthedocs.io/en/latest/tree.html
+            return acc.add(
+                label
+            )  # see https://rich.readthedocs.io/en/latest/tree.html
+
         self.visit(tree_builder, failure_tree)
         rich.print(failure_tree)
 
@@ -186,13 +201,13 @@ class ValidationFailure:
     def __repr__(self) -> str:
         causes_str = ""
         if self.causes:
-            causes_str = ", "+", ".join(repr(cause) for cause in self.causes)
+            causes_str = ", " + ", ".join(repr(cause) for cause in self.causes)
         return f"{type(self).__name__}({repr(self.val)}, {repr(self.t)}{causes_str})"
 
     def _str_type_descr(self, type_quals: tuple[str, ...] = ()) -> str:
         descr = "type alias" if isinstance(self.t, str) else "type"
         if type_quals:
-            descr = " ".join(type_quals)+" "+descr
+            descr = " ".join(type_quals) + " " + descr
         return descr
 
     def _str_main_msg(self, type_quals: tuple[str, ...] = ()) -> str:
@@ -221,9 +236,9 @@ class ValidationFailure:
             for line in _indent_lines(cause._str_lines(top_level=False))
         ]
 
-    def _str_lines(self, *,
-                   top_level: bool,
-                   type_quals: tuple[str, ...] = ()) -> list[str]:
+    def _str_lines(
+        self, *, top_level: bool, type_quals: tuple[str, ...] = ()
+    ) -> list[str]:
         # pylint: disable = too-many-branches
         lines = self._str_header_lines(top_level)
         lines.append(self._str_main_msg(type_quals))
@@ -233,19 +248,18 @@ class ValidationFailure:
 
 class UnionValidationFailure(ValidationFailure):
     """
-        Validation failures arising from union types.
+    Validation failures arising from union types.
     """
 
-    def __new__(cls,
-                val: Any, t: Any,
-                *causes: ValidationFailure,
-                type_aliases: Optional[Mapping[str, Any]] = None) -> Self:
+    def __new__(
+        cls,
+        val: Any,
+        t: Any,
+        *causes: ValidationFailure,
+        type_aliases: Optional[Mapping[str, Any]] = None,
+    ) -> Self:
         instance = super().__new__(
-            cls,
-            val,
-            t,
-            *causes,
-            type_aliases=type_aliases
+            cls, val, t, *causes, type_aliases=type_aliases
         )
         assert all(cause.val == val for cause in causes)
         return instance
@@ -259,61 +273,62 @@ class UnionValidationFailure(ValidationFailure):
         return [
             line
             for cause in self.causes
-            for line in _indent_lines(cause._str_lines(top_level=False, type_quals=("member",)))
+            for line in _indent_lines(
+                cause._str_lines(top_level=False, type_quals=("member",))
+            )
         ]
 
     # def _str_causes_lines(self) -> list[str]:
-        # lines: list[str] = []
-        # leaf_causes: List[ValidationFailure] = []
-        # causes_to_expand: List[ValidationFailure] = []
-        # for cause in self.causes:
-        #     if cause.causes:
-        #         causes_to_expand.append(cause)
-        #     else:
-        #         leaf_causes.append(cause)
-        # if leaf_causes and causes_to_expand:
-        #     leaf_causes_line = f"Not of the following member types: {', '.join(_type_str(cause.t) for cause in leaf_causes)}."
-        #     lines.append(_indent(leaf_causes_line))
-        # elif leaf_causes:
-        #     leaf_causes_line = f"Not of any member type: {', '.join(_type_str(cause.t) for cause in leaf_causes)}."
-        #     lines.append(_indent(leaf_causes_line))
-        # elif causes_to_expand:
-        #     pass
-        # else:
-        #     lines.append("Type union is empty.")
-        # for cause in causes_to_expand:
-        #     lines.append(_indent(f"Not of member type {repr(cause.t)}, details below:"))
-        #     lines.extend(_indent_lines(cause._str_lines(top_level=False), 2))
-        #     # for sub_cause in cause.causes:
-        #     #     lines.extend(_indent_lines(sub_cause._str_lines(top_level=False), 2))
-        # return lines
+    # lines: list[str] = []
+    # leaf_causes: List[ValidationFailure] = []
+    # causes_to_expand: List[ValidationFailure] = []
+    # for cause in self.causes:
+    #     if cause.causes:
+    #         causes_to_expand.append(cause)
+    #     else:
+    #         leaf_causes.append(cause)
+    # if leaf_causes and causes_to_expand:
+    #     leaf_causes_line = f"Not of the following member types: {', '.join(_type_str(cause.t) for cause in leaf_causes)}."
+    #     lines.append(_indent(leaf_causes_line))
+    # elif leaf_causes:
+    #     leaf_causes_line = f"Not of any member type: {', '.join(_type_str(cause.t) for cause in leaf_causes)}."
+    #     lines.append(_indent(leaf_causes_line))
+    # elif causes_to_expand:
+    #     pass
+    # else:
+    #     lines.append("Type union is empty.")
+    # for cause in causes_to_expand:
+    #     lines.append(_indent(f"Not of member type {repr(cause.t)}, details below:"))
+    #     lines.extend(_indent_lines(cause._str_lines(top_level=False), 2))
+    #     # for sub_cause in cause.causes:
+    #     #     lines.extend(_indent_lines(sub_cause._str_lines(top_level=False), 2))
+    # return lines
 
 
 class ValidationFailureAtIdx(ValidationFailure):
     """
-        Validation failures arising at a given index of a sequence.
+    Validation failures arising at a given index of a sequence.
     """
 
     _idx: int
     _ordered: bool
 
-    def __new__(cls,
-                val: Any, t: Any,
-                idx_cause: ValidationFailure,
-                idx: int,
-                *,
-                ordered: bool = True,
-                type_aliases: Optional[Mapping[str, Any]] = None) -> Self:
+    def __new__(
+        cls,
+        val: Any,
+        t: Any,
+        idx_cause: ValidationFailure,
+        idx: int,
+        *,
+        ordered: bool = True,
+        type_aliases: Optional[Mapping[str, Any]] = None,
+    ) -> Self:
         # pylint: disable = too-many-arguments
         if ordered:
             assert isinstance(val, Sequence)
         assert idx in range(len(val))
         instance = super().__new__(
-            cls,
-            val,
-            t,
-            idx_cause,
-            type_aliases=type_aliases
+            cls, val, t, idx_cause, type_aliases=type_aliases
         )
         instance._idx = idx
         instance._ordered = ordered
@@ -322,15 +337,15 @@ class ValidationFailureAtIdx(ValidationFailure):
     @property
     def idx(self) -> int:
         """
-            The of the collection item at which this failure arose.
+        The of the collection item at which this failure arose.
         """
         return self._idx
 
     @property
     def ordered(self) -> bool:
         """
-            Whether the collection is ordered.
-            If not, the item :attr:`idx` might not be stable.
+        Whether the collection is ordered.
+        If not, the item :attr:`idx` might not be stable.
         """
         return self._ordered
 
@@ -340,28 +355,28 @@ class ValidationFailureAtIdx(ValidationFailure):
             f"invalid value at idx: {self.idx}"
         )
 
+
 class ValidationFailureAtKey(ValidationFailure):
     """
-        Validation failures arising at a given key of a mapping.
+    Validation failures arising at a given key of a mapping.
     """
 
     _key: Any
 
-    def __new__(cls,
-                val: Any, t: Any,
-                key_cause: ValidationFailure,
-                key: Any,
-                *,
-                type_aliases: Optional[Mapping[str, Any]] = None) -> Self:
+    def __new__(
+        cls,
+        val: Any,
+        t: Any,
+        key_cause: ValidationFailure,
+        key: Any,
+        *,
+        type_aliases: Optional[Mapping[str, Any]] = None,
+    ) -> Self:
         # pylint: disable = too-many-arguments
         assert isinstance(val, Mapping)
         assert key in val
         instance = super().__new__(
-            cls,
-            val,
-            t,
-            key_cause,
-            type_aliases=type_aliases
+            cls, val, t, key_cause, type_aliases=type_aliases
         )
         instance._key = key
         return instance
@@ -369,7 +384,7 @@ class ValidationFailureAtKey(ValidationFailure):
     @property
     def key(self) -> Any:
         """
-            The key of the outer sequence at which this failure arose.
+        The key of the outer sequence at which this failure arose.
         """
         return self._key
 
@@ -379,32 +394,34 @@ class ValidationFailureAtKey(ValidationFailure):
             f"invalid value at key: {self.key!r}"
         )
 
+
 class MissingKeysValidationFailure(ValidationFailure):
     """
-        Validation failures arising because of missing required keys
-        in a mapping.
+    Validation failures arising because of missing required keys
+    in a mapping.
     """
 
     _missing_keys: tuple[Any, ...]
 
-    def __new__(cls,
-                val: Any, t: Any,
-                missing_keys: Sequence[Any],
-                *,
-                type_aliases: Optional[Mapping[str, Any]] = None) -> Self:
+    def __new__(
+        cls,
+        val: Any,
+        t: Any,
+        missing_keys: Sequence[Any],
+        *,
+        type_aliases: Optional[Mapping[str, Any]] = None,
+    ) -> Self:
         assert isinstance(val, Mapping)
         assert len(missing_keys) >= 0
         assert all(k not in val for k in missing_keys)
-        instance = super().__new__(
-            cls, val, t, type_aliases=type_aliases
-        )
+        instance = super().__new__(cls, val, t, type_aliases=type_aliases)
         instance._missing_keys = tuple(missing_keys)
         return instance
 
     @property
     def missing_keys(self) -> tuple[Any, ...]:
         """
-            The required key(s) missing from the mapping.
+        The required key(s) missing from the mapping.
         """
         return self._missing_keys
 
@@ -422,24 +439,24 @@ class MissingKeysValidationFailure(ValidationFailure):
 
 def get_validation_failure(err: TypeError) -> ValidationFailure:
     """
-        Programmatic access to the validation failure tree for the latest validation call.
+    Programmatic access to the validation failure tree for the latest validation call.
 
-        >>> from typing_validation import validate, get_validation_failure
-        >>> try:
-        ...     validate([[0, 1], [1, 2], [2, "hi"]], list[list[int]])
-        ... except TypeError as err:
-        ...     validation_failure = get_validation_failure(err)
-        ...
-        >>> validation_failure
-        ValidationFailure([[0, 1], [1, 2], [2, 'hi']], list[list[int]],
-            ValidationFailure([2, 'hi'], list[int],
-                ValidationFailure('hi', <class 'int'>)))
+    >>> from typing_validation import validate, get_validation_failure
+    >>> try:
+    ...     validate([[0, 1], [1, 2], [2, "hi"]], list[list[int]])
+    ... except TypeError as err:
+    ...     validation_failure = get_validation_failure(err)
+    ...
+    >>> validation_failure
+    ValidationFailure([[0, 1], [1, 2], [2, 'hi']], list[list[int]],
+        ValidationFailure([2, 'hi'], list[int],
+            ValidationFailure('hi', <class 'int'>)))
 
-        :param err: type error raised by :func:`~typing_validation.validation.validate`
-        :type err: :obj:`TypeError`
+    :param err: type error raised by :func:`~typing_validation.validation.validate`
+    :type err: :obj:`TypeError`
 
-        Raises :obj:`TypeError` if the given error ``err`` is a :obj:`TypeError`.
-        Raises :obj:`ValueError` if no validation failure data is available (when ``err`` is not a validation error raised by this library).
+    Raises :obj:`TypeError` if the given error ``err`` is a :obj:`TypeError`.
+    Raises :obj:`ValueError` if no validation failure data is available (when ``err`` is not a validation error raised by this library).
     """
     if not isinstance(err, TypeError):
         raise TypeError(f"Expected TypeError, found {type(err)}")
@@ -450,22 +467,23 @@ def get_validation_failure(err: TypeError) -> ValidationFailure:
         raise ValueError("TypeError given is not a validation error.")
     return validation_failure
 
+
 def latest_validation_failure() -> Optional[ValidationFailure]:
     """
-        Programmatic access to the validation failure tree for the latest validation call.
-        Uses :obj:`sys.last_value`, so it must be called immediately after the error occurred.
+    Programmatic access to the validation failure tree for the latest validation call.
+    Uses :obj:`sys.last_value`, so it must be called immediately after the error occurred.
 
-        >>> from typing_validation import validate, latest_validation_failure
-        >>> validate([[0, 1], [1, 2], [2, "hi"]], list[list[int]])
-        TypeError: ...
-        >>> latest_validation_failure()
-        ValidationFailure([[0, 1], [1, 2], [2, 'hi']], list[list[int]],
-            ValidationFailure([2, 'hi'], list[int],
-                ValidationFailure('hi', <class 'int'>)))
+    >>> from typing_validation import validate, latest_validation_failure
+    >>> validate([[0, 1], [1, 2], [2, "hi"]], list[list[int]])
+    TypeError: ...
+    >>> latest_validation_failure()
+    ValidationFailure([[0, 1], [1, 2], [2, 'hi']], list[list[int]],
+        ValidationFailure([2, 'hi'], list[int],
+            ValidationFailure('hi', <class 'int'>)))
 
     """
     try:
-        err = sys.last_value # pylint: disable = no-member
+        err = sys.last_value  # pylint: disable = no-member
     except AttributeError:
         return None
     if not isinstance(err, TypeError):
