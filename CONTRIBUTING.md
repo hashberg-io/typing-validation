@@ -86,3 +86,12 @@ docs>make html
 ```
 
 The script `make-api-clean-html.bat` automates the procedure on Windows. If you edit the [readme page](README.rst), please conform to the [standard-readme](https://github.com/RichardLitt/standard-readme) specification.
+
+
+### Code Formatting
+
+Code should be formatted by [Black](https://github.com/psf/black):
+
+```
+black -l 80 -t py38 -t py39 -t py310 -t py311 -t py312 .\typed_descriptors
+```
