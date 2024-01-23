@@ -10,7 +10,7 @@ import collections.abc as collections_abc
 from keyword import iskeyword
 import sys
 import typing
-from typing import Any, ForwardRef, Optional, Union, get_type_hints
+from typing import Any, ForwardRef, Hashable, Optional, Union, get_type_hints
 import typing_extensions
 
 from .validation_failure import (
@@ -555,6 +555,15 @@ def validate(val: Any, t: Any) -> None:
     """
     # pylint: disable = too-many-return-statements, too-many-branches, too-many-statements
     unsupported_type_error: Optional[ValueError] = None
+    if not isinstance(t, Hashable):
+        if isinstance(val, TypeInspector):
+            val._record_unsupported_type(t)
+            return
+        if unsupported_type_error is None:
+            unsupported_type_error = ValueError(
+                f"Unsupported validation for type {repr(t)}. Type is not hashable."
+            )  # pragma: nocover
+        raise unsupported_type_error
     if t in _basic_types:
         # speed things up for the likely most common case
         _validate_type(val, t)
