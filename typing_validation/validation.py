@@ -566,7 +566,7 @@ def validate(val: Any, t: Any) -> None:
         raise unsupported_type_error
     if t in _basic_types:
         # speed things up for the likely most common case
-        _validate_type(val, t)
+        _validate_type(val, typing.cast(type, t))
         return
     if t is None or t is NoneType:
         if isinstance(val, TypeInspector):
@@ -576,7 +576,7 @@ def validate(val: Any, t: Any) -> None:
             raise _type_error(val, t)
         return
     if t in _pseudotypes:
-        _validate_type(val, t)
+        _validate_type(val, typing.cast(type, t))
         return
     if t is Any:
         if isinstance(val, TypeInspector):
