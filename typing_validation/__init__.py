@@ -11,6 +11,7 @@ from .validation import (
     validation_aliases,
     validated,
     validated_iter,
+    is_valid
 )
 from .validation_failure import (
     get_validation_failure,
@@ -22,6 +23,7 @@ __all__ = [
     "validate",
     "can_validate",
     "validation_aliases",
+    "is_valid",
     "validated",
     "validated_iter",
     "TypeInspector",

@@ -19,6 +19,7 @@ from .validation_failure import (
     MissingKeysValidationFailure,
     UnionValidationFailure,
     ValidationFailure,
+    _set_latest_validation_failure
 )
 from .inspector import TypeInspector
 
@@ -735,66 +736,21 @@ T = typing.TypeVar("T")
     and :func:`validated_iter`.
 """
 
-class ValidationResult:
-    """
-    A validation result object, which can be used as a Boolean but also
-    carries information about the detailed failure cause in case of
-    unsuccessful validation.
-    """
-
-    @staticmethod
-    def success() -> ValidationResult:
-        """
-        Returns a successful validation result.
-        """
-        return ValidationResult(None)
-
-    @staticmethod
-    def failure(cause: ValidationFailure) -> ValidationResult:
-        """
-        Returns a failed validation result.
-        """
-        return ValidationResult(cause)
-
-    _cause: Optional[ValidationFailure]
-    def __init__(self, cause: Optional[ValidationFailure]) -> None:
-        self._cause = cause
-
-    @property
-    def cause(self) -> ValidationFailure:
-        """
-        Returns the cause of this validation failure.
-        :raises AttributeError: if validation was successful and no
-                                failure cause is available
-        """
-        cause = self._cause
-        if cause is None:
-            raise AttributeError(
-                "Validation was successful, no failure cause is available."
-            )
-        return cause
-
-    def __bool__(self) -> bool:
-        """
-        Returrns :obj:`True` if validation was successful and :obj:`False` if
-        validation was unsuccessful.
-        """
-        return self.failure is None
-
-def is_valid(val: T, t: Any) -> ValidationResult:
+def is_valid(val: T, t: Any) -> bool:
     """
     Performs the same functionality as :func:`validate`, but returning
     :obj:`False` if validation is unsuccessful instead of raising error.
 
-    To be precise, it returns a :class:`ValidationResult` instance,
-    which :obj:`bool` casts to :obj:`True` if validation is successful and
-    to :obj:`False` if validation fails.
+    In case of validation failure, detailed failure information is accessible
+    via :func:`~typing_validation.validation_failure.latest_validation_failure`.
     """
     try:
         validate(val, t)
-        return ValidationResult.success()
+        _set_latest_validation_failure(None)
+        return True
     except TypeError as e:
-        return ValidationResult.failure(getattr(e, "validation_failure"))
+        _set_latest_validation_failure(getattr(e, "validation_failure"))
+        return False
 
 def validated(val: T, t: Any) -> T:
     """
