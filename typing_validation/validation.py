@@ -19,7 +19,7 @@ from .validation_failure import (
     MissingKeysValidationFailure,
     UnionValidationFailure,
     ValidationFailure,
-    _set_latest_validation_failure
+    _set_latest_validation_failure,
 )
 from .inspector import TypeInspector
 
@@ -736,6 +736,7 @@ T = typing.TypeVar("T")
     and :func:`validated_iter`.
 """
 
+
 def is_valid(val: T, t: Any) -> bool:
     """
     Performs the same functionality as :func:`validate`, but returning
@@ -751,6 +752,7 @@ def is_valid(val: T, t: Any) -> bool:
     except TypeError as e:
         _set_latest_validation_failure(getattr(e, "validation_failure"))
         return False
+
 
 def validated(val: T, t: Any) -> T:
     """

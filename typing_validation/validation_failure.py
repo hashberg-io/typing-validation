@@ -481,8 +481,9 @@ def latest_validation_failure() -> Optional[ValidationFailure]:
         ValidationFailure([2, 'hi'], list[int],
             ValidationFailure('hi', <class 'int'>)))
 
-    This validation failure information is also set by :func:`is_valid` in case
-    of failed validation, even though no error is raised.
+    This validation failure information is also set by
+    :func:`~typing_validation.validation.is_valid` in case of failed validation,
+    even though no error is raised.
     """
     type_err: Optional[TypeError] = None
     try:
@@ -496,16 +497,18 @@ def latest_validation_failure() -> Optional[ValidationFailure]:
         return get_validation_failure(type_err)
     return latest_validation_failure
 
+
 _latest_validation_failure: Optional[ValidationFailure] = None
 
+
 def _set_latest_validation_failure(
-        failure: Optional[ValidationFailure]
-    ) -> Optional[ValidationFailure]:
+    failure: Optional[ValidationFailure],
+) -> Optional[ValidationFailure]:
     """
     Sets a new value for ``_latest_validation_failure`` and returns
     the previous value.
     """
-    global _latest_validation_failure # pylint: disable = global-statement
+    global _latest_validation_failure  # pylint: disable = global-statement
     prev_failure = _latest_validation_failure
     _latest_validation_failure = failure
     return prev_failure

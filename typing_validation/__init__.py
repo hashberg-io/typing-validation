@@ -11,7 +11,7 @@ from .validation import (
     validation_aliases,
     validated,
     validated_iter,
-    is_valid
+    is_valid,
 )
 from .validation_failure import (
     get_validation_failure,
