@@ -78,7 +78,7 @@ The function `is_valid` is a variant of the `validate <https://typing-validation
 >>> is_valid([0, 1, "hi"], list[int])
 False
 
-The function `latest_validation_failure <https://typing-validation.readthedocs.io/en/latest/api/typing_validation.validation.html#typing_validation.validation_failure.latest_validation_failure>` can be used to access detailed information immediately after a failure:
+The function `latest_validation_failure <https://typing-validation.readthedocs.io/en/latest/api/typing_validation.validation.html#typing_validation.validation_failure.latest_validation_failure>`_ can be used to access detailed information immediately after a failure:
 
 >>> from typing_validation import latest_validation_failure
 >>> is_valid([0, 1, "hi"], list[int])
@@ -89,7 +89,7 @@ Runtime validation error raised by validate(val, t), details below.
 For type list[int], invalid value at idx: 2
   For type <class 'int'>, invalid value: 'hi'
 
-Please note that `latest_validation_failure <https://typing-validation.readthedocs.io/en/latest/api/typing_validation.validation.html#typing_validation.validation_failure.latest_validation_failure>` clears the internal failure logs after returning the latest failure, so the latter must be manually stored if it needs to be accessed multiple times.
+Please note that `latest_validation_failure <https://typing-validation.readthedocs.io/en/latest/api/typing_validation.validation.html#typing_validation.validation_failure.latest_validation_failure>`_ clears the internal failure logs after returning the latest failure, so the latter must be manually stored if it needs to be accessed multiple times.
 
 
 API
