@@ -525,9 +525,16 @@ def _validate_user_class(val: Any, t: Any) -> None:
 #     raise _type_error(val, t, is_union=True)
 
 
-def validate(val: Any, t: Any) -> None:
+def validate(val: Any, t: Any) -> Literal[True]:
     """
     Performs runtime type-checking for the value ``val`` against type ``t``.
+    The function raises :obj:`TypeError` upon failure and returns :obj:`True` upon success.
+    The :obj:`True` return value means that :func:`validate` can be gated behind assertions
+    and compiled away on optimised execution:
+
+    .. code-block:: python
+
+        assert validate(val, t) # compiled away using -O and -OO
 
     For structured types, the error message keeps track of the chain of validation failures, e.g.
 
@@ -558,7 +565,7 @@ def validate(val: Any, t: Any) -> None:
     if not isinstance(t, Hashable):
         if isinstance(val, TypeInspector):
             val._record_unsupported_type(t)
-            return
+            return True
         if unsupported_type_error is None:
             unsupported_type_error = ValueError(
                 f"Unsupported validation for type {repr(t)}. Type is not hashable."
@@ -567,32 +574,32 @@ def validate(val: Any, t: Any) -> None:
     if t in _basic_types:
         # speed things up for the likely most common case
         _validate_type(val, typing.cast(type, t))
-        return
+        return True
     if t is None or t is NoneType:
         if isinstance(val, TypeInspector):
             val._record_none()
-            return
+            return True
         if val is not None:
             raise _type_error(val, t)
-        return
+        return True
     if t in _pseudotypes:
         _validate_type(val, typing.cast(type, t))
-        return
+        return True
     if t is Any:
         if isinstance(val, TypeInspector):
             val._record_any()
-            return
-        return
+            return True
+        return True
     if UnionType is not None and isinstance(t, UnionType):
         _validate_union(val, t, union_type=True)
-        return
+        return True
     if hasattr(t, "__origin__"):  # parametric types
         if t.__origin__ is Union:
             _validate_union(val, t)
-            return
+            return True
         if t.__origin__ is Literal or t.__origin__ is typing_extensions.Literal:
             _validate_literal(val, t)
-            return
+            return True
         if t.__origin__ in _origins:
             if isinstance(val, TypeInspector):
                 val._record_pending_type_generic(t.__origin__)
@@ -601,26 +608,26 @@ def validate(val: Any, t: Any) -> None:
             if t.__origin__ in _collection_origins:
                 ordered = t.__origin__ in _ordered_collection_origins
                 _validate_collection(val, t, ordered)
-                return
+                return True
             if t.__origin__ in _mapping_origins:
                 _validate_mapping(val, t)
-                return
+                return True
             if t.__origin__ == tuple:
                 _validate_tuple(val, t)
-                return
+                return True
             if t.__origin__ in _iterator_origins:
                 if isinstance(val, TypeInspector):
                     _validate_collection(val, t, ordered=False)
                 # Item type cannot be validated for iterators (use validated_iter)
-                return
+                return True
             if t.__origin__ in _maybe_collection_origins and isinstance(
                 val, typing.Collection
             ):
                 _validate_collection(val, t, ordered=False)
-                return
+                return True
         elif isinstance(t.__origin__, type):
             _validate_user_class(val, t)
-            return
+            return True
     elif isinstance(t, type):
         # The `isinstance(t, type)` case goes after the `hasattr(t, "__origin__")` case:
         # e.g. `isinstance(list[int], type)` in 3.10, but we want to validate `list[int]`
@@ -630,19 +637,19 @@ def validate(val: Any, t: Any) -> None:
                 t, "_is_runtime_protocol"
             ):
                 _validate_type(val, t)
-                return
+                return True
             if isinstance(val, TypeInspector):
                 val._record_unsupported_type(t)
-                return
+                return True
             unsupported_type_error = ValueError(
                 f"Unsupported validation for Protocol {repr(t)}, because it is not runtime-checkable."
             )  # pragma: nocover
         elif _is_typed_dict(t):
             _validate_typed_dict(val, t)
-            return
+            return True
         else:
             _validate_type(val, t)
-            return
+            return True
     elif isinstance(t, (str, ForwardRef)):
         if isinstance(t, str):
             t_alias: str = t
@@ -662,10 +669,10 @@ def validate(val: Any, t: Any) -> None:
             )  # pragma: nocover
         else:
             _validate_alias(val, t_alias)
-            return
+            return True
     if isinstance(val, TypeInspector):
         val._record_unsupported_type(t)
-        return
+        return True
     if unsupported_type_error is None:
         unsupported_type_error = ValueError(
             f"Unsupported validation for type {repr(t)}."
@@ -728,6 +735,66 @@ T = typing.TypeVar("T")
     and :func:`validated_iter`.
 """
 
+class ValidationResult:
+    """
+    A validation result object, which can be used as a Boolean but also
+    carries information about the detailed failure cause in case of
+    unsuccessful validation.
+    """
+
+    @staticmethod
+    def success() -> ValidationResult:
+        """
+        Returns a successful validation result.
+        """
+        return ValidationResult(None)
+
+    @staticmethod
+    def failure(cause: ValidationFailure) -> ValidationResult:
+        """
+        Returns a failed validation result.
+        """
+        return ValidationResult(cause)
+
+    _cause: Optional[ValidationFailure]
+    def __init__(self, cause: Optional[ValidationFailure]) -> None:
+        self._cause = cause
+
+    @property
+    def cause(self) -> ValidationFailure:
+        """
+        Returns the cause of this validation failure.
+        :raises AttributeError: if validation was successful and no
+                                failure cause is available
+        """
+        cause = self._cause
+        if cause is None:
+            raise AttributeError(
+                "Validation was successful, no failure cause is available."
+            )
+        return cause
+
+    def __bool__(self) -> bool:
+        """
+        Returrns :obj:`True` if validation was successful and :obj:`False` if
+        validation was unsuccessful.
+        """
+        return self.failure is None
+
+def is_valid(val: T, t: Any) -> ValidationResult:
+    """
+    Performs the same functionality as :func:`validate`, but returning
+    :obj:`False` if validation is unsuccessful instead of raising error.
+
+    To be precise, it returns a :class:`ValidationResult` instance,
+    which :obj:`bool` casts to :obj:`True` if validation is successful and
+    to :obj:`False` if validation fails.
+    """
+    try:
+        validate(val, t)
+        return ValidationResult.success()
+    except TypeError as e:
+        return ValidationResult.failure(getattr(e, "validation_failure"))
 
 def validated(val: T, t: Any) -> T:
     """
