@@ -261,7 +261,7 @@ class UnionValidationFailure(ValidationFailure):
         instance = super().__new__(
             cls, val, t, *causes, type_aliases=type_aliases
         )
-        assert all(cause.val == val for cause in causes)
+        assert all(cause.val is val for cause in causes)
         return instance
 
     def _str_type_descr(self, type_quals: tuple[str, ...] = ()) -> str:
