@@ -423,7 +423,8 @@ class InvalidNumpyDTypeValidationFailure(ValidationFailure):
         *,
         type_aliases: Optional[Mapping[str, Any]] = None,
     ) -> Self:
-        import numpy as np # pylint: disable = import-outside-toplevel
+        import numpy as np  # pylint: disable = import-outside-toplevel
+
         assert isinstance(val, np.ndarray)
         instance = super().__new__(cls, val, t, type_aliases=type_aliases)
         return instance
