@@ -278,32 +278,6 @@ class UnionValidationFailure(ValidationFailure):
             )
         ]
 
-    # def _str_causes_lines(self) -> list[str]:
-    # lines: list[str] = []
-    # leaf_causes: List[ValidationFailure] = []
-    # causes_to_expand: List[ValidationFailure] = []
-    # for cause in self.causes:
-    #     if cause.causes:
-    #         causes_to_expand.append(cause)
-    #     else:
-    #         leaf_causes.append(cause)
-    # if leaf_causes and causes_to_expand:
-    #     leaf_causes_line = f"Not of the following member types: {', '.join(_type_str(cause.t) for cause in leaf_causes)}."
-    #     lines.append(_indent(leaf_causes_line))
-    # elif leaf_causes:
-    #     leaf_causes_line = f"Not of any member type: {', '.join(_type_str(cause.t) for cause in leaf_causes)}."
-    #     lines.append(_indent(leaf_causes_line))
-    # elif causes_to_expand:
-    #     pass
-    # else:
-    #     lines.append("Type union is empty.")
-    # for cause in causes_to_expand:
-    #     lines.append(_indent(f"Not of member type {repr(cause.t)}, details below:"))
-    #     lines.extend(_indent_lines(cause._str_lines(top_level=False), 2))
-    #     # for sub_cause in cause.causes:
-    #     #     lines.extend(_indent_lines(sub_cause._str_lines(top_level=False), 2))
-    # return lines
-
 
 class ValidationFailureAtIdx(ValidationFailure):
     """
@@ -434,6 +408,30 @@ class MissingKeysValidationFailure(ValidationFailure):
         return (
             f"For {self._str_type_descr(type_quals)} {repr(self.t)}, "
             f"missing required {keys_repr}"
+        )
+
+
+class InvalidNumpyDTypeValidationFailure(ValidationFailure):
+    """
+    Validation failures arising because of invalid NumPy dtype.
+    """
+
+    def __new__(
+        cls,
+        val: Any,
+        t: Any,
+        *,
+        type_aliases: Optional[Mapping[str, Any]] = None,
+    ) -> Self:
+        import numpy as np # pylint: disable = import-outside-toplevel
+        assert isinstance(val, np.ndarray)
+        instance = super().__new__(cls, val, t, type_aliases=type_aliases)
+        return instance
+
+    def _str_main_msg(self, type_quals: tuple[str, ...] = ()) -> str:
+        return (
+            f"For {self._str_type_descr(type_quals)} {repr(self.t)}, "
+            f"invalid array dtype {self.val.dtype}"
         )
 
 

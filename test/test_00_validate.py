@@ -336,3 +336,32 @@ _user_class_cases = (
 def test_user_class_cases(val: typing.Any, ts: typing.List[typing.Any]) -> None:
     for t in ts:
         validate(val, t)
+
+def test_numpy_array() -> None:
+    # pylint: disable = import-outside-toplevel
+    import numpy as np
+    import numpy.typing as npt
+    val = np.zeros(5, dtype=np.uint8)
+    validate(val, npt.NDArray[np.uint8])
+    validate(val, npt.NDArray[typing.Union[np.uint8, np.float32]])
+    validate(val, npt.NDArray[typing.Union[typing.Any, np.float32]])
+    validate(val, npt.NDArray[typing.Any])
+    validate(val, npt.NDArray[
+        typing.Union[
+            np.float32,
+            typing.Union[
+                np.uint16,
+                typing.Union[np.int8,typing.Any]
+            ]
+        ]
+    ])
+
+def test_numpy_array_error() -> None:
+    # pylint: disable = import-outside-toplevel
+    import numpy as np
+    import numpy.typing as npt
+    val = np.zeros(5, dtype=np.uint8)
+    with pytest.raises(TypeError):
+        validate(val, npt.NDArray[typing.Union[np.uint16,np.float32]])
+    with pytest.raises(TypeError):
+        validate(val, npt.NDArray[np.str_])

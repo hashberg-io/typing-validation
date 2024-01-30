@@ -52,6 +52,20 @@ For type list[typing.Union[typing.Collection[int], dict[str, str]]], invalid val
     For member type dict[str, str], invalid value at key: 'hi'
       For type <class 'str'>, invalid value: 0
 
+For NumPy array types, the array `dtype <https://numpy.org/devdocs/reference/arrays.dtypes.html>`_ is validated against the `NDArray <https://numpy.org/devdocs/reference/typing.html#numpy.typing.NDArray>`_ dtype annotation (unions of dtypes and `Any <https://docs.python.org/3/library/typing.html#typing.Any>`_ are allowed):
+
+>>> from typing_validation import validate
+>>> import numpy as np
+>>> import numpy.typing as npt
+>>> a = np.zeros(5, dtype=np.float64)
+>>> validate(a, npt.NDArray[np.float64])
+True
+>>> validate(a, npt.NDArray[Any])
+True
+>>> validate(a, npt.NDArray[np.uint8])
+TypeError: Runtime validation error raised by validate(val, t), details below.
+For type numpy.ndarray[typing.Any, numpy.dtype[numpy.uint8]], invalid array dtype float64
+
 The function :func:`~typing_validation.validation.is_valid` is a variant of the :func:`~typing_validation.validation.validate` function which returns :obj:`False` in case of validation failure, instead of raising :exc:`TypeError`:
 
 >>> from typing_validation import is_valid

@@ -85,3 +85,21 @@ def test_user_class_cases(t: typing.Any) -> None:
     assert can_validate(typing.Optional[t]), f"Should be able to validate {typing.Optional[t]}"
     str(can_validate(t))
     assert_recorded_type(t)
+
+def test_numpy_array() -> None:
+    # pylint: disable = import-outside-toplevel
+    import numpy as np
+    import numpy.typing as npt
+    can_validate(npt.NDArray[np.uint8])
+    can_validate(npt.NDArray[typing.Union[np.uint8, np.float32]])
+    can_validate(npt.NDArray[typing.Union[typing.Any, np.float32]])
+    can_validate(npt.NDArray[typing.Any])
+    can_validate(npt.NDArray[
+        typing.Union[
+            np.float32,
+            typing.Union[
+                np.uint16,
+                typing.Union[np.int8,typing.Any]
+            ]
+        ]
+    ])
