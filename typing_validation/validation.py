@@ -535,6 +535,9 @@ def _extract_dtypes(t: Any) -> typing.Sequence[Any]:
 
 
 def _validate_numpy_array(val: Any, t: Any) -> None:
+    import numpy as np  # pylint: disable = import-outside-toplevel
+    if not isinstance(val, TypeInspector):
+        _validate_type(val, np.ndarray)
     assert hasattr(t, "__args__"), _missing_args_msg(t)
     assert len(t.__args__) == 2, _wrong_args_num_msg(t, 2)
     dtype_t_container = t.__args__[1]
@@ -560,9 +563,6 @@ def _validate_numpy_array(val: Any, t: Any) -> None:
         for arg in t.__args__:
             validate(val, arg)
         return
-    import numpy as np  # pylint: disable = import-outside-toplevel
-
-    assert isinstance(val, np.ndarray)
     val_dtype = val.dtype
     if any(dtype is Any or np.issubdtype(val_dtype, dtype) for dtype in dtypes):
         return
