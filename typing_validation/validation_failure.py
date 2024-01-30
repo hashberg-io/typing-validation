@@ -482,7 +482,7 @@ def latest_validation_failure() -> Optional[ValidationFailure]:
             ValidationFailure('hi', <class 'int'>)))
 
     This validation failure information is also set by
-    :func:`~typing_validation.validation.is_valid` in case of failed validation,
+    ``is_valid`` in case of failed validation,
     even though no error is raised.
     """
     type_err: Optional[TypeError] = None
