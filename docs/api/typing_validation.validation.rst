@@ -13,6 +13,11 @@ can_validate
 
 .. autofunction:: typing_validation.validation.can_validate
 
+is_valid
+--------
+
+.. autofunction:: typing_validation.validation.is_valid
+
 validate
 --------
 

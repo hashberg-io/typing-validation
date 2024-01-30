@@ -56,7 +56,7 @@ The core functionality of this library is provided by the `validate` function:
 The `validate` function is invoked with a value and a type as its arguments and it returns nothing when the given value is valid for the given type:
 
 >>> validate(12, int)
-# nothing is returned => 12 is a valid int
+True # no error raised => 12 is a valid int
 
 If the value is invalid for the given type, the `validate` function raises a `TypeError`:
 
@@ -70,6 +70,26 @@ For nested types (e.g. parametric collection/mapping types), the full chain of v
 TypeError: Runtime validation error raised by validate(val, t), details below.
 For type list[int], invalid value at idx: 2
   For type <class 'int'>, invalid value: 'hi'
+
+
+The function `is_valid` is a variant of the `validate` function which returns `False` in case of validation failure, instead of raising `TypeError`:
+
+>>> from typing_validation import is_valid
+>>> is_valid([0, 1, "hi"], list[int])
+False
+
+The function `latest_validation_failure` can be used to access detailed information immediately after a failure:
+
+>>> from typing_validation import latest_validation_failure
+>>> is_valid([0, 1, "hi"], list[int])
+False
+>>> failure = latest_validation_failure()
+>>> print(failure)
+Runtime validation error raised by validate(val, t), details below.
+For type list[int], invalid value at idx: 2
+  For type <class 'int'>, invalid value: 'hi'
+
+Please note that `latest_validation_failure` clears the internal failure logs after returning the latest failure, so the latter must be manually stored if it needs to be accessed multiple times.
 
 
 API

@@ -10,10 +10,9 @@ If ``val`` is a value of type ``t``, the call ``validate(val, t)`` raises no err
 
 >>> from typing_validation import validate
 >>> validate([0, 1, 2], list[int])
-# no error raised => [0, 1, 2] is a value of type list[int]
+True # no error raised => [0, 1, 2] is a value of type list[int]
 
 If ``val`` is **not** a value of type ``t``, the call ``validate(val, t)`` raises a :exc:`TypeError`, with detailed information about validation failure(s):
-
 
 >>> validate([[0, 1, 2], {"hi": 0}], list[Union[Collection[int], dict[str, str]]])
 TypeError: Runtime validation error raised by validate(val, t), details below.
@@ -23,6 +22,12 @@ For type list[typing.Union[typing.Collection[int], dict[str, str]]], invalid val
       For type <class 'int'>, invalid value: 'hi'
     For member type dict[str, str], invalid value at key: 'hi'
       For type <class 'str'>, invalid value: 0
+
+The function :func:`~typing_validation.validation.is_valid` is a variant of the `validate` function which returns :obj:`False` in case of validation failure, instead of raising `TypeError`:
+
+>>> from typing_validation import is_valid
+>>> is_valid([0, 1, "hi"], list[int])
+False
 
 
 .. toctree::
