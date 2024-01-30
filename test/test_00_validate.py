@@ -355,10 +355,11 @@ def test_numpy_array() -> None:
             ]
         ]
     ])
-    validate(val, npt.NDArray[np.number[typing.Any]])
-    validate(val, npt.NDArray[np.integer[typing.Any]])
-    validate(val, npt.NDArray[np.unsignedinteger[typing.Any]])
-    validate(val, npt.NDArray[np.generic])
+    if sys.version_info[1] >= 9:
+        validate(val, npt.NDArray[np.number[typing.Any]])
+        validate(val, npt.NDArray[np.integer[typing.Any]])
+        validate(val, npt.NDArray[np.unsignedinteger[typing.Any]])
+        validate(val, npt.NDArray[np.generic])
 
 def test_numpy_array_error() -> None:
     # pylint: disable = import-outside-toplevel
