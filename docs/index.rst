@@ -23,7 +23,7 @@ For type list[typing.Union[typing.Collection[int], dict[str, str]]], invalid val
     For member type dict[str, str], invalid value at key: 'hi'
       For type <class 'str'>, invalid value: 0
 
-The function :func:`~typing_validation.validation.is_valid` is a variant of the `validate` function which returns :obj:`False` in case of validation failure, instead of raising `TypeError`:
+The function :func:`~typing_validation.validation.is_valid` is a variant of the :func:`~typing_validation.validation.validate` function which returns :obj:`False` in case of validation failure, instead of raising :obj:`TypeError`:
 
 >>> from typing_validation import is_valid
 >>> is_valid([0, 1, "hi"], list[int])
