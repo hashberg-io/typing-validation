@@ -35,8 +35,9 @@ else:
 
 
 def _indent_lines(lines: Sequence[str], level: int = 1) -> list[str]:
-    """Indent all given blocks of text (no newlines)."""
-    assert not any("\n" in line for line in lines)
+    """Indent all given blocks of text."""
+    if any("\n" in line for line in lines):
+        lines = [l for line in lines for l in line.split("\n")]
     ind = " " * 2 * level
     return [ind + line for line in lines]
 
