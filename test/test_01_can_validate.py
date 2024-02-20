@@ -109,5 +109,5 @@ def test_typevar() -> None:
     assert can_validate(T)
     IntT = typing.TypeVar("IntT", bound=int)
     assert can_validate(IntT)
-    IntStrSeqT = typing.TypeVar("IntStrSeqT", bound=typing.Sequence[int|str])
+    IntStrSeqT = typing.TypeVar("IntStrSeqT", bound=typing.Sequence[typing.Union[int,str]])
     assert can_validate(IntStrSeqT)

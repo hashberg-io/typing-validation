@@ -383,7 +383,7 @@ def test_typevar() -> None:
         validate(None, IntT)
     with pytest.raises(TypeError):
         validate([0, 1], IntT)
-    IntStrSeqT = typing.TypeVar("IntStrSeqT", bound=typing.Sequence[int|str])
+    IntStrSeqT = typing.TypeVar("IntStrSeqT", bound=typing.Sequence[typing.Union[int,str]])
     validate([0, "hello"], IntStrSeqT)
     validate("Hello", IntStrSeqT)
     with pytest.raises(TypeError):
