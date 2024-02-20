@@ -15,6 +15,13 @@ FailureTreeVisitor
     :show-inheritance:
     :members:
 
+InvalidNumpyDTypeValidationFailure
+----------------------------------
+
+.. autoclass:: typing_validation.validation_failure.InvalidNumpyDTypeValidationFailure
+    :show-inheritance:
+    :members:
+
 MissingKeysValidationFailure
 ----------------------------
 

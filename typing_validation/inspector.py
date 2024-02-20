@@ -332,13 +332,13 @@ class TypeInspector:
             name = param.__name__
             bound = param.__bound__
             if bound is None:
-                lines = [indent+f"TypeVar({name!r})"]
+                lines = [indent + f"TypeVar({name!r})"]
             else:
                 bound_lines, idx = self._repr(idx + 1, level + 1)
                 lines = [
-                    indent+f"TypeVar({name!r}, bound=",
+                    indent + f"TypeVar({name!r}, bound=",
                     *bound_lines,
-                    indent+")"
+                    indent + ")",
                 ]
             return lines, idx
         if tag == "union":
@@ -423,9 +423,11 @@ class TypeInspector:
                 return lines, idx
             assert isinstance(param, int)
             lines = [
-                indent + f"{pending_type.__name__}["
-                if pending_type is not None
-                else indent + "Tuple["
+                (
+                    indent + f"{pending_type.__name__}["
+                    if pending_type is not None
+                    else indent + "Tuple["
+                )
             ]
             for _ in range(param):
                 item_lines, idx = self._repr(idx + 1, level + 1)

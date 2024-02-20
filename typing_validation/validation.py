@@ -10,7 +10,15 @@ import collections.abc as collections_abc
 from keyword import iskeyword
 import sys
 import typing
-from typing import Any, ForwardRef, Hashable, Optional, TypeVar, Union, get_type_hints
+from typing import (
+    Any,
+    ForwardRef,
+    Hashable,
+    Optional,
+    TypeVar,
+    Union,
+    get_type_hints,
+)
 import typing_extensions
 
 from .validation_failure import (
@@ -220,6 +228,7 @@ def _type_error(
     setattr(error, "validation_failure", validation_failure)
     return error
 
+
 def _typevar_error(val: Any, t: Any, bound_error: TypeError) -> TypeError:
     assert hasattr(bound_error, "validation_failure"), bound_error
     cause = getattr(bound_error, "validation_failure")
@@ -228,6 +237,7 @@ def _typevar_error(val: Any, t: Any, bound_error: TypeError) -> TypeError:
     error = TypeError(str(validation_failure))
     setattr(error, "validation_failure", validation_failure)
     return error
+
 
 def _idx_type_error(
     val: Any, t: Any, idx_error: TypeError, *, idx: int, ordered: bool
@@ -524,6 +534,7 @@ def _extract_dtypes(t: Any) -> typing.Sequence[Any]:
             dtype for member in t.__args__ for dtype in _extract_dtypes(member)
         ]
     import numpy as np  # pylint: disable = import-outside-toplevel
+
     if hasattr(t, "__origin__"):
         t_origin = t.__origin__
         if t_origin in {
@@ -542,8 +553,10 @@ def _extract_dtypes(t: Any) -> typing.Sequence[Any]:
         return [t]
     raise TypeError()
 
+
 def _validate_numpy_array(val: Any, t: Any) -> None:
     import numpy as np  # pylint: disable = import-outside-toplevel
+
     if not isinstance(val, TypeInspector):
         _validate_type(val, np.ndarray)
     assert hasattr(t, "__args__"), _missing_args_msg(t)
@@ -587,6 +600,7 @@ def _validate_typevar(val: Any, t: TypeVar) -> None:
             validate(val, bound)
         except TypeError as e:
             raise _typevar_error(val, t, e) from None
+
 
 # def _validate_callable(val: Any, t: Any) -> None:
 #     """

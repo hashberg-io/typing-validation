@@ -197,9 +197,9 @@ class ValidationFailure:
 
     def _str_type_descr(self, type_quals: tuple[str, ...] = ()) -> str:
         descr = (
-            "type alias" if isinstance(self.t, str)
-            else "type variable" if isinstance(self.t, TypeVar)
-            else "type"
+            "type alias"
+            if isinstance(self.t, str)
+            else "type variable" if isinstance(self.t, TypeVar) else "type"
         )
         if type_quals:
             descr = " ".join(type_quals) + " " + descr
