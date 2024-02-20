@@ -90,11 +90,11 @@ def test_numpy_array() -> None:
     # pylint: disable = import-outside-toplevel
     import numpy as np
     import numpy.typing as npt
-    can_validate(npt.NDArray[np.uint8])
-    can_validate(npt.NDArray[typing.Union[np.uint8, np.float32]])
-    can_validate(npt.NDArray[typing.Union[typing.Any, np.float32]])
-    can_validate(npt.NDArray[typing.Any])
-    can_validate(npt.NDArray[
+    assert can_validate(npt.NDArray[np.uint8])
+    assert can_validate(npt.NDArray[typing.Union[np.uint8, np.float32]])
+    assert can_validate(npt.NDArray[typing.Union[typing.Any, np.float32]])
+    assert can_validate(npt.NDArray[typing.Any])
+    assert can_validate(npt.NDArray[
         typing.Union[
             np.float32,
             typing.Union[
@@ -103,3 +103,11 @@ def test_numpy_array() -> None:
             ]
         ]
     ])
+
+def test_typevar() -> None:
+    T = typing.TypeVar("T")
+    assert can_validate(T)
+    IntT = typing.TypeVar("IntT", bound=int)
+    assert can_validate(IntT)
+    IntStrSeqT = typing.TypeVar("IntStrSeqT", bound=typing.Sequence[int|str])
+    assert can_validate(IntStrSeqT)

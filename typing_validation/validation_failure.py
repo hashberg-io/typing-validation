@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import sys
 import typing
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, TypeVar
 
 if sys.version_info[1] >= 8:
     from typing import Protocol
@@ -22,16 +22,6 @@ if sys.version_info[1] >= 11:
     from typing import Self
 else:
     from typing_extensions import Self
-
-
-# def _indent(msg: str, level: int = 1, *,
-#             allow_newlines: bool = False) -> str:
-#     """ Indent a block of text (possibly with newlines) """
-#     ind = " "*2*level
-#     if allow_newlines:
-#         return ind+msg.replace("\n", "\n"+ind)
-#     assert "\n" not in msg
-#     return ind+msg
 
 
 def _indent_lines(lines: Sequence[str], level: int = 1) -> list[str]:
@@ -206,7 +196,11 @@ class ValidationFailure:
         return f"{type(self).__name__}({repr(self.val)}, {repr(self.t)}{causes_str})"
 
     def _str_type_descr(self, type_quals: tuple[str, ...] = ()) -> str:
-        descr = "type alias" if isinstance(self.t, str) else "type"
+        descr = (
+            "type alias" if isinstance(self.t, str)
+            else "type variable" if isinstance(self.t, TypeVar)
+            else "type"
+        )
         if type_quals:
             descr = " ".join(type_quals) + " " + descr
         return descr
@@ -434,6 +428,32 @@ class InvalidNumpyDTypeValidationFailure(ValidationFailure):
         return (
             f"For {self._str_type_descr(type_quals)} {repr(self.t)}, "
             f"invalid array dtype {self.val.dtype}"
+        )
+
+
+class TypeVarBoundValidationFailure(ValidationFailure):
+    """
+    Validation failures arising from the bound of a type variable.
+    """
+
+    def __new__(
+        cls,
+        val: Any,
+        t: Any,
+        bound_cause: ValidationFailure,
+        *,
+        type_aliases: Optional[Mapping[str, Any]] = None,
+    ) -> Self:
+        # pylint: disable = too-many-arguments
+        instance = super().__new__(
+            cls, val, t, bound_cause, type_aliases=type_aliases
+        )
+        return instance
+
+    def _str_main_msg(self, type_quals: tuple[str, ...] = ()) -> str:
+        return (
+            f"For {self._str_type_descr(type_quals)} {repr(self.t)}, "
+            f"value is not valid for upper bound."
         )
 
 

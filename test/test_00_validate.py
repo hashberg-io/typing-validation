@@ -370,3 +370,21 @@ def test_numpy_array_error() -> None:
         validate(val, npt.NDArray[typing.Union[np.uint16,np.float32]])
     with pytest.raises(TypeError):
         validate(val, npt.NDArray[np.str_])
+
+
+def test_typevar() -> None:
+    T = typing.TypeVar("T")
+    validate(10, T)
+    validate(None, T)
+    validate([0, "hello"], T)
+    IntT = typing.TypeVar("IntT", bound=int)
+    validate(10, IntT)
+    with pytest.raises(TypeError):
+        validate(None, IntT)
+    with pytest.raises(TypeError):
+        validate([0, 1], IntT)
+    IntStrSeqT = typing.TypeVar("IntStrSeqT", bound=typing.Sequence[int|str])
+    validate([0, "hello"], IntStrSeqT)
+    validate("Hello", IntStrSeqT)
+    with pytest.raises(TypeError):
+        validate(0, IntStrSeqT)

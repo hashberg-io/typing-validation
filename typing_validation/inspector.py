@@ -9,7 +9,7 @@ import collections
 import collections.abc as collections_abc
 import sys
 import typing
-from typing import Any, Optional, Union, get_type_hints
+from typing import Any, Optional, TypeVar, Union, get_type_hints
 
 if sys.version_info[1] >= 8:
     from typing import Literal
@@ -34,6 +34,7 @@ if sys.version_info[1] >= 9:
         typing.Tuple[Literal["collection"], None],
         typing.Tuple[Literal["mapping"], None],
         typing.Tuple[Literal["typed-dict"], type],
+        typing.Tuple[Literal["typevar"], TypeVar],
         typing.Tuple[Literal["union"], int],
         typing.Tuple[Literal["tuple"], Optional[int]],
         typing.Tuple[Literal["user-class"], Optional[int]],
@@ -253,6 +254,9 @@ class TypeInspector:
     def _record_typed_dict(self, t: type) -> None:
         self._append_constructor_args(("typed-dict", t))
 
+    def _record_typevar(self, t: TypeVar) -> None:
+        self._append_constructor_args(("typevar", t))
+
     def _record_pending_type_generic(self, t: type) -> None:
         assert self._pending_generic_type_constr is None
         self._pending_generic_type_constr = ("type", t)
@@ -323,6 +327,20 @@ class TypeInspector:
             return [
                 indent + f"Literal[{', '.join(repr(p) for p in param)}]"
             ], idx
+        if tag == "typevar":
+            assert isinstance(param, TypeVar)
+            name = param.__name__
+            bound = param.__bound__
+            if bound is None:
+                lines = [indent+f"TypeVar({name!r})"]
+            else:
+                bound_lines, idx = self._repr(idx + 1, level + 1)
+                lines = [
+                    indent+f"TypeVar({name!r}, bound=",
+                    *bound_lines,
+                    indent+")"
+                ]
+            return lines, idx
         if tag == "union":
             assert isinstance(param, int)
             lines = [indent + "Union["]
@@ -355,7 +373,6 @@ class TypeInspector:
             return lines, idx
         pending_type = None
         if tag == "type":
-            # if isinstance(param, type):
             if not isinstance(param, tuple):
                 param_name = (
                     param.__name__ if isinstance(param, type) else str(param)

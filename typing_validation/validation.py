@@ -10,11 +10,12 @@ import collections.abc as collections_abc
 from keyword import iskeyword
 import sys
 import typing
-from typing import Any, ForwardRef, Hashable, Optional, Union, get_type_hints
+from typing import Any, ForwardRef, Hashable, Optional, TypeVar, Union, get_type_hints
 import typing_extensions
 
 from .validation_failure import (
     InvalidNumpyDTypeValidationFailure,
+    TypeVarBoundValidationFailure,
     ValidationFailureAtIdx,
     ValidationFailureAtKey,
     MissingKeysValidationFailure,
@@ -219,6 +220,14 @@ def _type_error(
     setattr(error, "validation_failure", validation_failure)
     return error
 
+def _typevar_error(val: Any, t: Any, bound_error: TypeError) -> TypeError:
+    assert hasattr(bound_error, "validation_failure"), bound_error
+    cause = getattr(bound_error, "validation_failure")
+    assert isinstance(cause, ValidationFailure), cause
+    validation_failure = TypeVarBoundValidationFailure(val, t, cause)
+    error = TypeError(str(validation_failure))
+    setattr(error, "validation_failure", validation_failure)
+    return error
 
 def _idx_type_error(
     val: Any, t: Any, idx_error: TypeError, *, idx: int, ordered: bool
@@ -533,7 +542,6 @@ def _extract_dtypes(t: Any) -> typing.Sequence[Any]:
         return [t]
     raise TypeError()
 
-
 def _validate_numpy_array(val: Any, t: Any) -> None:
     import numpy as np  # pylint: disable = import-outside-toplevel
     if not isinstance(val, TypeInspector):
@@ -568,6 +576,17 @@ def _validate_numpy_array(val: Any, t: Any) -> None:
         return
     raise _numpy_dtype_error(val, t)
 
+
+def _validate_typevar(val: Any, t: TypeVar) -> None:
+    if isinstance(val, TypeInspector):
+        val._record_typevar(t)
+        pass
+    bound = t.__bound__
+    if bound is not None:
+        try:
+            validate(val, bound)
+        except TypeError as e:
+            raise _typevar_error(val, t, e) from None
 
 # def _validate_callable(val: Any, t: Any) -> None:
 #     """
@@ -618,16 +637,16 @@ def validate(val: Any, t: Any) -> Literal[True]:
 
     For structured types, the error message keeps track of the chain of validation failures, e.g.
 
-    >>> from typing import *
-    >>> from typing_validation import validate
-    >>> validate([[0, 1, 2], {"hi": 0}], list[Union[Collection[int], dict[str, str]]])
-    TypeError: Runtime validation error raised by validate(val, t), details below.
-    For type list[typing.Union[typing.Collection[int], dict[str, str]]], invalid value at idx: 1
-    For union type typing.Union[typing.Collection[int], dict[str, str]], invalid value: {'hi': 0}
-        For member type typing.Collection[int], invalid value at idx: 0
-        For type <class 'int'>, invalid value: 'hi'
-        For member type dict[str, str], invalid value at key: 'hi'
-        For type <class 'str'>, invalid value: 0
+        >>> from typing import *
+        >>> from typing_validation import validate
+        >>> validate([[0, 1, 2], {"hi": 0}], list[Union[Collection[int], dict[str, str]]])
+        TypeError: Runtime validation error raised by validate(val, t), details below.
+        For type list[typing.Union[typing.Collection[int], dict[str, str]]], invalid value at idx: 1
+        For union type typing.Union[typing.Collection[int], dict[str, str]], invalid value: {'hi': 0}
+            For member type typing.Collection[int], invalid value at idx: 0
+            For type <class 'int'>, invalid value: 'hi'
+            For member type dict[str, str], invalid value at key: 'hi'
+            For type <class 'str'>, invalid value: 0
 
     **Note.** For Python 3.7 and 3.8, use :obj:`~typing.Dict` and :obj:`~typing.List` instead of :obj:`dict` and :obj:`list` for the above examples.
 
@@ -669,6 +688,9 @@ def validate(val: Any, t: Any) -> Literal[True]:
         if isinstance(val, TypeInspector):
             val._record_any()
             return True
+        return True
+    if isinstance(t, TypeVar):
+        _validate_typevar(val, t)
         return True
     if UnionType is not None and isinstance(t, UnionType):
         _validate_union(val, t, union_type=True)
