@@ -2,7 +2,7 @@
     Runtime validation using type hints.
 """
 
-__version__ = "1.2.9"
+__version__ = "1.2.10"
 
 from .inspector import TypeInspector, UnsupportedType
 from .validation import (
