@@ -23,6 +23,7 @@ import typing_extensions
 
 from .validation_failure import (
     InvalidNumpyDTypeValidationFailure,
+    SubtypeValidationFailure,
     TypeVarBoundValidationFailure,
     ValidationFailureAtIdx,
     ValidationFailureAtKey,
@@ -199,6 +200,29 @@ _origins = (
 )
 
 
+class UnsupportedTypeError(ValueError):
+    """
+    Class for errors raised when attempting to validate an unsupported type.
+
+    .. warning::
+
+        Currently extends :obj:`ValueError` for backwards compatibility.
+        This will be changed to :obj:`NotImplementedError` in v1.3.0.
+    """
+
+
+def _unsupported_type_error(
+    t: Any, explanation: Union[str, None] = None
+) -> UnsupportedTypeError:
+    """
+    Error for unsupported types, with optional explanation.
+    """
+    msg = "Unsupported validation for type {t!r}."
+    if explanation is not None:
+        msg += " " + explanation
+    return UnsupportedTypeError(msg)
+
+
 def _type_error(
     val: Any, t: Any, *errors: TypeError, is_union: bool = False
 ) -> TypeError:
@@ -267,6 +291,13 @@ def _key_type_error(
 
 def _missing_keys_type_error(val: Any, t: Any, *missing_keys: Any) -> TypeError:
     validation_failure = MissingKeysValidationFailure(val, t, missing_keys)
+    error = TypeError(str(validation_failure))
+    setattr(error, "validation_failure", validation_failure)
+    return error
+
+
+def _subtype_error(s: Any, t: Any) -> TypeError:
+    validation_failure = SubtypeValidationFailure(s, t)
     error = TypeError(str(validation_failure))
     setattr(error, "validation_failure", validation_failure)
     return error
@@ -505,21 +536,88 @@ def _validate_typed_dict(val: Any, t: type) -> None:
             except TypeError as e:
                 raise _key_type_error(val, t, e, key=k) from None
 
-
 def _validate_user_class(val: Any, t: Any) -> None:
     assert hasattr(t, "__args__"), _missing_args_msg(t)
     assert isinstance(
         t.__args__, tuple
     ), f"For type {repr(t)}, expected '__args__' to be a tuple."
     if isinstance(val, TypeInspector):
+        if t.__origin__ is type:
+            if len(t.__args__) != 1 or not _can_validate_subtype_of(
+                t.__args__[0]
+            ):
+                val._record_unsupported_type(t)
+                return
         val._record_pending_type_generic(t.__origin__)
         val._record_user_class(*t.__args__)
         for arg in t.__args__:
             validate(val, arg)
         return
     _validate_type(val, t.__origin__)
-    # Generic type arguments cannot be validated
+    if t.__origin__ is type:
+        if len(t.__args__) != 1:
+            raise _unsupported_type_error(t)
+        _validate_subtype_of(val, t.__args__[0])
+        return
+    # TODO: Generic type arguments cannot be validated in general,
+    #       but in a future release it will be possible for classes to define
+    #       a dunder classmethod which can be used to validate type arguments.
 
+def __extract_member_types(u: Any) -> tuple[Any, ...]|None:
+    q = collections.deque([u])
+    member_types: list[Any] = []
+    while q:
+        t = q.popleft()
+        if t is Any:
+            return None
+        elif UnionType is not None and isinstance(t, UnionType):
+            q.extend(t.__args__)
+        elif hasattr(t, "__origin__") and t.__origin__ is Union:
+            q.extend(t.__args__)
+        else:
+            member_types.append(t)
+    return tuple(member_types)
+
+def __check_can_validate_subtypes(*subtypes: Any) -> None:
+    for s in subtypes:
+        if not isinstance(s, type):
+            raise ValueError(
+                "validate(s, Type[t]) is only supported when 's' is "
+                "an instance of 'type' or a union of instances of 'type'.\n"
+                f"Found s = {'|'.join(str(s) for s in subtypes)}"
+            )
+
+def __check_can_validate_supertypes(*supertypes: Any) -> None:
+    for t in supertypes:
+        if not isinstance(t, type):
+            raise ValueError(
+                "validate(s, Type[t]) is only supported when 't' is "
+                "an instance of 'type' or a union of instances of 'type'.\n"
+                f"Found t = {'|'.join(str(t) for t in supertypes)}"
+            )
+
+def _can_validate_subtype_of(t: Any) -> bool:
+    try:
+        # This is the validation part of _validate_subtype:
+        t_member_types = __extract_member_types(t)
+        if t_member_types is not None:
+            __check_can_validate_supertypes(*t_member_types)
+        return True
+    except ValueError:
+        return False
+
+def _validate_subtype_of(s: Any, t: Any) -> None:
+    # 1. Validation:
+    __check_can_validate_subtypes(s)
+    t_member_types = __extract_member_types(t)
+    if t_member_types is None:
+        # An Any was found amongst the member types, all good.
+        return
+    __check_can_validate_supertypes(*t_member_types)
+    # 2. Subtype check:
+    if not issubclass(s, t_member_types):
+        raise _subtype_error(s, t)
+    # TODO: improve support for subtype checks.
 
 def _extract_dtypes(t: Any) -> typing.Sequence[Any]:
     if t is Any:
@@ -575,8 +673,8 @@ def _validate_numpy_array(val: Any, t: Any) -> None:
         if isinstance(val, TypeInspector):
             val._record_unsupported_type(t)
             return
-        raise ValueError(
-            f"Unsupported validation for NumPy dtype {repr(dtype_t)}."
+        raise _unsupported_type_error(
+            t, f"Unsupported NumPy dtype {dtype_t!r}"
         ) from None
     if isinstance(val, TypeInspector):
         val._record_pending_type_generic(t.__origin__)
@@ -669,21 +767,24 @@ def validate(val: Any, t: Any) -> Literal[True]:
     :param t: the type to type-check against
     :type t: :obj:`~typing.Any`
     :raises TypeError: if ``val`` is not of type ``t``
-    :raises ValueError: if validation for type ``t`` is not supported
+    :raises UnsupportedTypeError: if validation for type ``t`` is not supported
     :raises AssertionError: if things go unexpectedly wrong with ``__args__`` for parametric types
 
     """
     # pylint: disable = too-many-return-statements, too-many-branches, too-many-statements
-    unsupported_type_error: Optional[ValueError] = None
+    unsupported_type_error: Optional[UnsupportedTypeError] = None
     if not isinstance(t, Hashable):
         if isinstance(val, TypeInspector):
             val._record_unsupported_type(t)
             return True
         if unsupported_type_error is None:
-            unsupported_type_error = ValueError(
-                f"Unsupported validation for type {repr(t)}. Type is not hashable."
+            unsupported_type_error = _unsupported_type_error(
+                t, "Type is not hashable."
             )  # pragma: nocover
         raise unsupported_type_error
+    if t is typing.Type:
+        # Replace non-generic 'Type' with non-generic 'type':
+        t = type
     if t in _basic_types:
         # speed things up for the likely most common case
         _validate_type(val, typing.cast(type, t))
@@ -765,8 +866,8 @@ def validate(val: Any, t: Any) -> Literal[True]:
             if isinstance(val, TypeInspector):
                 val._record_unsupported_type(t)
                 return True
-            unsupported_type_error = ValueError(
-                f"Unsupported validation for Protocol {repr(t)}, because it is not runtime-checkable."
+            unsupported_type_error = _unsupported_type_error(
+                t, "Protocol class is not runtime-checkable."
             )  # pragma: nocover
         elif _is_typed_dict(t):
             _validate_typed_dict(val, t)
@@ -788,8 +889,8 @@ def validate(val: Any, t: Any) -> Literal[True]:
                 hint = f"Perhaps set it with validation_aliases({t_alias}=...)?"
             else:
                 hint = f"Perhaps set it with validation_aliases(**{{'{t_alias}': ...}})?"
-            unsupported_type_error = ValueError(
-                f"Type alias '{t_alias}' is not known. {hint}"
+            unsupported_type_error = _unsupported_type_error(
+                t_alias, f"Type alias is not known. {hint}"
             )  # pragma: nocover
         else:
             _validate_alias(val, t_alias)
@@ -798,15 +899,13 @@ def validate(val: Any, t: Any) -> Literal[True]:
         val._record_unsupported_type(t)
         return True
     if unsupported_type_error is None:
-        unsupported_type_error = ValueError(
-            f"Unsupported validation for type {repr(t)}."
-        )  # pragma: nocover
+        unsupported_type_error = _unsupported_type_error(t)  # pragma: nocover
     raise unsupported_type_error
 
 
 def can_validate(t: Any) -> TypeInspector:
     r"""
-    Checks whether validation is supported for the given type ``t``: if not, :func:`validate` will raise :obj:`ValueError`.
+    Checks whether validation is supported for the given type ``t``: if not, :func:`validate` will raise :obj:`UnsupportedTypeError`.
 
     The returned :class:`TypeInspector` instance can be used wherever a boolean is expected, and will indicate whether the type is supported or not:
 

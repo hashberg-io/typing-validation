@@ -111,3 +111,11 @@ def test_typevar() -> None:
     assert can_validate(IntT)
     IntStrSeqT = typing.TypeVar("IntStrSeqT", bound=typing.Sequence[typing.Union[int,str]])
     assert can_validate(IntStrSeqT)
+
+def test_subtype() -> None:
+    assert can_validate(type)
+    assert can_validate(typing.Type)
+    assert can_validate(typing.Type[int])
+    assert can_validate(typing.Type[typing.Union[int,str]])
+    assert can_validate(typing.Type[typing.Any])
+    assert can_validate(typing.Type[typing.Union[typing.Any, str, int]])

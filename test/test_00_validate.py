@@ -388,3 +388,17 @@ def test_typevar() -> None:
     validate("Hello", IntStrSeqT)
     with pytest.raises(TypeError):
         validate(0, IntStrSeqT)
+
+def test_subtype() -> None:
+    validate(int, type)
+    validate(int, typing.Type)
+    validate(int, typing.Type[int])
+    validate(int, typing.Type[typing.Any])
+    validate(int, typing.Type[typing.Union[float,str,typing.Any]])
+    validate(int, typing.Type[typing.Union[int,str]])
+    with pytest.raises(TypeError):
+        validate(int, typing.Type[typing.Union[str, float]])
+    with pytest.raises(TypeError):
+        validate(10, typing.Type[int])
+    with pytest.raises(TypeError):
+        validate(10, typing.Type[typing.Union[str, float]])

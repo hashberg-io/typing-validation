@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import sys
 import typing
-from typing import Any, Mapping, Optional, TypeVar
+from typing import Any, Mapping, Optional, Type, TypeVar
 
 if sys.version_info[1] >= 8:
     from typing import Protocol
@@ -452,8 +452,34 @@ class TypeVarBoundValidationFailure(ValidationFailure):
 
     def _str_main_msg(self, type_quals: tuple[str, ...] = ()) -> str:
         return (
-            f"For {self._str_type_descr(type_quals)} {repr(self.t)}, "
-            f"value is not valid for upper bound."
+            f"For {self._str_type_descr(type_quals)} {self.t!r}, "
+            f"value is not valid for upper bound: {self.val!r}"
+        )
+
+
+class SubtypeValidationFailure(ValidationFailure):
+    """
+    Validation failures arising from ``validate(s, Type[t])`` when ``s`` is not
+    a subtype of ``t``.
+    """
+
+    def __new__(
+        cls,
+        s: Any,
+        t: Any,
+        *,
+        type_aliases: Optional[Mapping[str, Any]] = None,
+    ) -> Self:
+        # pylint: disable = too-many-arguments
+        instance = super().__new__(cls, s, Type[t], type_aliases=type_aliases)
+        return instance
+
+    def _str_main_msg(self, type_quals: tuple[str, ...] = ()) -> str:
+        t = self.t
+        bound_t = t.__args__[0]
+        return (
+            f"For {self._str_type_descr(type_quals)} {t!r}, "
+            f"type bound is not a supertype of value: {self.val!r}"
         )
 
 

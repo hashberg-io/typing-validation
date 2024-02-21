@@ -228,7 +228,10 @@ class TypeInspector:
             "mapping",
             "collection",
             "user-class",
-        ), f"Found unexpected tag '{args_tag}' with type constructor {pending_generic_type_constr} pending."
+        ), (
+            f"Found unexpected tag '{args_tag}' with "
+            f"type constructor {pending_generic_type_constr} pending."
+        )
         if sys.version_info[1] >= 9:
             self._recorded_constructors.append(
                 typing.cast(
