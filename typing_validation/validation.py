@@ -904,29 +904,50 @@ def validate(val: Any, t: Any) -> Literal[True]:
 
 
 def can_validate(t: Any) -> TypeInspector:
-    r"""
-    Checks whether validation is supported for the given type ``t``: if not, :func:`validate` will raise :obj:`UnsupportedTypeError`.
+    """
+    Checks whether validation is supported for the given type ``t``: if not,
+    :func:`validate` will raise :obj:`UnsupportedTypeError`.
 
-    The returned :class:`TypeInspector` instance can be used wherever a boolean is expected, and will indicate whether the type is supported or not:
+    .. warning::
+
+        The return type will be changed to :obj:`bool` in v1.3.0.
+        To obtain a :class:`TypeInspector` object, please use the newly
+        introduced :func:`inspect_type` instead.
+
+    :param t: the type to be checked for validation support
+    :type t: :obj:`~typing.Any`
+
+    """
+    inspector = TypeInspector()
+    validate(inspector, t)
+    return inspector
+
+
+def inspect_type(t: Any) -> TypeInspector:
+    r"""
+    Returns a :class:`TypeInspector` instance can be used wherever a boolean is
+    expected, and will indicate whether the type is supported or not:
 
     >>> from typing import *
-    >>> from typing_validation import can_validate
-    >>> res = can_validate(tuple[list[str], Union[int, float, Callable[[int], int]]])
+    >>> from typing_validation import inspect_type
+    >>> res = inspect_type(tuple[list[str], Union[int, float, Callable[[int], int]]])
     >>> bool(res)
     False
 
-    However, it also records (with minimal added cost) the full structure of the type as the latter was validated, which it then exposes via its
+    The instance also records (with minimal added cost) the full structure of
+    the type as the latter was validated, which it then exposes via its
     :attr:`TypeInspector.recorded_type` property:
 
-    >>> res = can_validate(tuple[list[Union[str, int]],...])
+    >>> res = inspect_type(tuple[list[Union[str, int]],...])
     >>> bool(res)
     True
     >>> res.recorded_type
     tuple[list[typing.Union[str, int]], ...]
 
-    Any unsupported subtype encountered during the validation is left in place, wrapped into an :class:`UnsupportedType`:
+    Any unsupported subtype encountered during the validation is left in place,
+    wrapped into an :class:`UnsupportedType`:
 
-    >>> can_validate(tuple[list[str], Union[int, float, Callable[[int], int]]])
+    >>> inspect_type(tuple[list[str], Union[int, float, Callable[[int], int]]])
     The following type cannot be validated against:
     tuple[
         list[
@@ -945,7 +966,7 @@ def can_validate(t: Any) -> TypeInspector:
 
     :param t: the type to be checked for validation support
     :type t: :obj:`~typing.Any`
-    :raises AssertionError: if things go unexpectedly wrong with ``__args__`` for parametric types
+
     """
     inspector = TypeInspector()
     validate(inspector, t)

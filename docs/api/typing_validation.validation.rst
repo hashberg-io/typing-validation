@@ -20,6 +20,11 @@ can_validate
 
 .. autofunction:: typing_validation.validation.can_validate
 
+inspect_type
+------------
+
+.. autofunction:: typing_validation.validation.inspect_type
+
 is_valid
 --------
 

@@ -44,6 +44,11 @@ if sys.version_info[1] >= 9:
 else:
     TypeConstructorArgs = typing.Tuple[str, Any]
 
+if sys.version_info[1] >= 11:
+    from typing import Self
+else:
+    from typing_extensions import Self
+
 _typing_equiv = {
     list: typing.List,
     tuple: typing.Tuple,
@@ -113,7 +118,7 @@ class TypeInspector:
         "_pending_generic_type_constr",
     )
 
-    def __new__(cls) -> "TypeInspector":
+    def __new__(cls) -> Self:
         instance = super().__new__(cls)
         instance._recorded_constructors = []
         instance._unsupported_types = []
@@ -133,6 +138,34 @@ class TypeInspector:
     def unsupported_types(self) -> typing.Tuple[Any, ...]:
         r"""The sequence of unsupported types encountered during validation."""
         return tuple(self._unsupported_types)
+
+    @property
+    def type_structure(self) -> str:
+        """
+        The structure of the recorded type:
+
+        1. The string spans multiple lines, with indentation levels matching
+           the nesting level of inner types.
+        2. Any unsupported types encountered are wrapped using the generic type
+           :obj:`UnsupportedType`.
+
+        """
+        return "\n".join(self._repr()[0])
+
+    @property
+    def type_annotation(self) -> str:
+        """
+        The type annotation for the recorded type.
+        Differs from the output of :attr:`type_structure` in the following ways:
+
+        1. The annotation is on a single line.
+        2. Unsupported types are not wrapped.
+
+        """
+        return "".join(
+            line.strip()
+            for line in self._repr(mark_unsupported=False)[0]
+        )
 
     def _recorded_type(self, idx: int) -> typing.Tuple[Any, int]:
         # pylint: disable = too-many-return-statements, too-many-branches
@@ -297,15 +330,23 @@ class TypeInspector:
         return not self._unsupported_types
 
     def __repr__(self) -> str:
-        # addr = "0x"+f"{id(self):x}"
-        header = f"The following type can{'' if self else 'not'} be validated against:"
-        return header + "\n" + "\n".join(self._repr()[0])
+        """
+        Representation of the inspector, including the :attr:`type_structure`.
+
+        :meta public:
+        """
+        return (
+            "TypeInspector instance for the following type:\n"
+            +self.type_structure
+        )
 
     def _repr(
-        self, idx: int = 0, level: int = 0
+        self, idx: int = 0, level: int = 0,
+        *,
+        mark_unsupported: bool = True
     ) -> typing.Tuple[typing.List[str], int]:
         # pylint: disable = too-many-return-statements, too-many-branches, too-many-statements, too-many-locals
-        basic_indent = "    "
+        basic_indent = "  "
         assert len(basic_indent) >= 2
         indent = basic_indent * level
         next_indent = basic_indent * (level + 1)
@@ -314,6 +355,8 @@ class TypeInspector:
         lines: typing.List[str]
         tag, param = self._recorded_constructors[idx]
         if tag == "unsupported":
+            if not mark_unsupported:
+                return [indent+str(param)], idx
             return [
                 indent + "UnsupportedType[",
                 indent + "    " + str(param),

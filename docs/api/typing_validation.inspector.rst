@@ -9,6 +9,7 @@ TypeInspector
 .. autoclass:: typing_validation.inspector.TypeInspector
     :show-inheritance:
     :members:
+    :special-members: __repr__
 
 UnsupportedType
 ---------------
