@@ -29,6 +29,20 @@ MissingKeysValidationFailure
     :show-inheritance:
     :members:
 
+SubtypeValidationFailure
+------------------------
+
+.. autoclass:: typing_validation.validation_failure.SubtypeValidationFailure
+    :show-inheritance:
+    :members:
+
+TypeVarBoundValidationFailure
+-----------------------------
+
+.. autoclass:: typing_validation.validation_failure.TypeVarBoundValidationFailure
+    :show-inheritance:
+    :members:
+
 UnionValidationFailure
 ----------------------
 

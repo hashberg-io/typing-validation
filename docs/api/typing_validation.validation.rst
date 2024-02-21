@@ -8,6 +8,13 @@ T
 
 .. autodata:: typing_validation.validation.T
 
+UnsupportedTypeError
+--------------------
+
+.. autoclass:: typing_validation.validation.UnsupportedTypeError
+    :show-inheritance:
+    :members:
+
 can_validate
 ------------
 
