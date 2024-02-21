@@ -412,10 +412,12 @@ class TypeInspector:
         if tag == "tuple":
             if param is None:
                 item_lines, idx = self._repr(idx + 1, level + 1)
+                item_lines[-1] += ","
                 if pending_type is not None:
                     lines = [
                         indent + f"{pending_type.__name__}[",
                         *item_lines,
+                        next_indent + "...",
                         indent + "]",
                     ]
                 else:
