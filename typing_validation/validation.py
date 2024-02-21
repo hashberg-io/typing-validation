@@ -536,6 +536,7 @@ def _validate_typed_dict(val: Any, t: type) -> None:
             except TypeError as e:
                 raise _key_type_error(val, t, e, key=k) from None
 
+
 def _validate_user_class(val: Any, t: Any) -> None:
     assert hasattr(t, "__args__"), _missing_args_msg(t)
     assert isinstance(
@@ -563,7 +564,8 @@ def _validate_user_class(val: Any, t: Any) -> None:
     #       but in a future release it will be possible for classes to define
     #       a dunder classmethod which can be used to validate type arguments.
 
-def __extract_member_types(u: Any) -> tuple[Any, ...]|None:
+
+def __extract_member_types(u: Any) -> tuple[Any, ...] | None:
     q = collections.deque([u])
     member_types: list[Any] = []
     while q:
@@ -578,6 +580,7 @@ def __extract_member_types(u: Any) -> tuple[Any, ...]|None:
             member_types.append(t)
     return tuple(member_types)
 
+
 def __check_can_validate_subtypes(*subtypes: Any) -> None:
     for s in subtypes:
         if not isinstance(s, type):
@@ -586,6 +589,7 @@ def __check_can_validate_subtypes(*subtypes: Any) -> None:
                 "an instance of 'type' or a union of instances of 'type'.\n"
                 f"Found s = {'|'.join(str(s) for s in subtypes)}"
             )
+
 
 def __check_can_validate_supertypes(*supertypes: Any) -> None:
     for t in supertypes:
@@ -596,6 +600,7 @@ def __check_can_validate_supertypes(*supertypes: Any) -> None:
                 f"Found t = {'|'.join(str(t) for t in supertypes)}"
             )
 
+
 def _can_validate_subtype_of(t: Any) -> bool:
     try:
         # This is the validation part of _validate_subtype:
@@ -605,6 +610,7 @@ def _can_validate_subtype_of(t: Any) -> bool:
         return True
     except ValueError:
         return False
+
 
 def _validate_subtype_of(s: Any, t: Any) -> None:
     # 1. Validation:
@@ -618,6 +624,7 @@ def _validate_subtype_of(s: Any, t: Any) -> None:
     if not issubclass(s, t_member_types):
         raise _subtype_error(s, t)
     # TODO: improve support for subtype checks.
+
 
 def _extract_dtypes(t: Any) -> typing.Sequence[Any]:
     if t is Any:

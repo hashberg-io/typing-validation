@@ -7,6 +7,7 @@ __version__ = "1.2.10"
 from .inspector import TypeInspector, UnsupportedType
 from .validation import (
     validate,
+    inspect_type,
     can_validate,
     validation_aliases,
     validated,
@@ -21,6 +22,7 @@ from .validation_failure import (
 # re-export all encodings and functions.
 __all__ = [
     "validate",
+    "inspect_type",
     "can_validate",
     "validation_aliases",
     "is_valid",

@@ -163,8 +163,7 @@ class TypeInspector:
 
         """
         return "".join(
-            line.strip()
-            for line in self._repr(mark_unsupported=False)[0]
+            line.strip() for line in self._repr(mark_unsupported=False)[0]
         )
 
     def _recorded_type(self, idx: int) -> typing.Tuple[Any, int]:
@@ -337,13 +336,11 @@ class TypeInspector:
         """
         return (
             "TypeInspector instance for the following type:\n"
-            +self.type_structure
+            + self.type_structure
         )
 
     def _repr(
-        self, idx: int = 0, level: int = 0,
-        *,
-        mark_unsupported: bool = True
+        self, idx: int = 0, level: int = 0, *, mark_unsupported: bool = True
     ) -> typing.Tuple[typing.List[str], int]:
         # pylint: disable = too-many-return-statements, too-many-branches, too-many-statements, too-many-locals
         basic_indent = "  "
@@ -356,7 +353,7 @@ class TypeInspector:
         tag, param = self._recorded_constructors[idx]
         if tag == "unsupported":
             if not mark_unsupported:
-                return [indent+str(param)], idx
+                return [indent + str(param)], idx
             return [
                 indent + "UnsupportedType[",
                 indent + "    " + str(param),
