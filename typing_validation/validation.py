@@ -430,7 +430,7 @@ def _validate_tuple(val: Any, t: Any) -> None:
                 ) from None
 
 
-def _validate_union(val: Any, t: Any, *, union_type: bool = False) -> None:
+def _validate_union(val: Any, t: Any, *, use_UnionType: bool = False) -> None:
     """
     Union type validation. Each type ``u`` listed in the union type ``t`` is checked:
 
@@ -444,7 +444,7 @@ def _validate_union(val: Any, t: Any, *, union_type: bool = False) -> None:
         t.__args__, tuple
     ), f"For type {repr(t)}, expected '__args__' to be a tuple."
     if isinstance(val, TypeInspector):
-        val._record_union(*t.__args__)
+        val._record_union(*t.__args__, use_UnionType=use_UnionType)
         for member_t in t.__args__:
             validate(val, member_t)
         return
@@ -815,7 +815,7 @@ def validate(val: Any, t: Any) -> Literal[True]:
         _validate_typevar(val, t)
         return True
     if UnionType is not None and isinstance(t, UnionType):
-        _validate_union(val, t, union_type=True)
+        _validate_union(val, t, use_UnionType=True)
         return True
     if hasattr(t, "__origin__"):  # parametric types
         if t.__origin__ is Union:

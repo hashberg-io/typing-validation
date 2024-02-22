@@ -35,7 +35,7 @@ if sys.version_info[1] >= 9:
         typing.Tuple[Literal["mapping"], None],
         typing.Tuple[Literal["typed-dict"], type],
         typing.Tuple[Literal["typevar"], TypeVar],
-        typing.Tuple[Literal["union"], int],
+        typing.Tuple[Literal["union"], tuple[int, bool]],
         typing.Tuple[Literal["tuple"], Optional[int]],
         typing.Tuple[Literal["user-class"], Optional[int]],
         typing.Tuple[Literal["alias"], str],
@@ -43,6 +43,11 @@ if sys.version_info[1] >= 9:
     ]
 else:
     TypeConstructorArgs = typing.Tuple[str, Any]
+
+if sys.version_info[1] >= 10:
+    from types import UnionType
+else:
+    UnionType = None
 
 if sys.version_info[1] >= 11:
     from typing import Self
@@ -186,12 +191,19 @@ class TypeInspector:
                 idx,
             )  # pylint: disable = unnecessary-dunder-call
         if tag == "union":
-            assert isinstance(param, int)
+            assert isinstance(param, tuple)
+            num_members, use_UnionType = param
+            assert isinstance(num_members, int)
             member_ts: typing.List[Any] = []
-            for _ in range(param):
+            for _ in range(num_members):
                 member_t, idx = self._recorded_type(idx + 1)
                 member_ts.append(member_t)
-            return typing.Union.__getitem__(tuple(member_ts)), idx
+            if not use_UnionType:
+                return typing.Union.__getitem__(tuple(member_ts)), idx
+            union_type = member_ts[0]
+            for t in member_ts[1:]:
+                union_type |= t
+            return union_type, idx
         if tag == "typed-dict":
             for _ in get_type_hints(param):
                 _, idx = self._recorded_type(idx + 1)
@@ -302,8 +314,11 @@ class TypeInspector:
     def _record_mapping(self, key_t: Any, value_t: Any) -> None:
         self._append_constructor_args(("mapping", None))
 
-    def _record_union(self, *member_ts: Any) -> None:
-        self._append_constructor_args(("union", len(member_ts)))
+    def _record_union(self, *member_ts: Any, use_UnionType: bool = False) -> None:
+        if use_UnionType:
+            assert member_ts, "Cannot use UnionType with empty members."
+            assert UnionType is not None, "Cannot use UnionType, version <= 3.9"
+        self._append_constructor_args(("union", (len(member_ts), use_UnionType)))
 
     def _record_variadic_tuple(self, item_t: Any) -> None:
         self._append_constructor_args(("tuple", None))
@@ -385,14 +400,22 @@ class TypeInspector:
                 ]
             return lines, idx
         if tag == "union":
-            assert isinstance(param, int)
-            lines = [indent + "Union["]
-            for _ in range(param):
+            assert isinstance(param, tuple)
+            num_members, use_UnionType = param
+            assert isinstance(num_members, int)
+            lines = []
+            if not use_UnionType:
+                lines.append(indent + "Union[")
+            for _ in range(num_members):
                 member_lines, idx = self._repr(idx + 1, level + 1)
-                member_lines[-1] += ","
+                if use_UnionType:
+                    member_lines[-1] += "|"
+                else:
+                    member_lines[-1] += ","
                 lines.extend(member_lines)
             assert len(lines) > 1, "Cannot take a union of no types."
-            lines.append(indent + "]")
+            if not use_UnionType:
+                lines.append(indent + "]")
             return lines, idx
         if tag == "typed-dict":
             t = param

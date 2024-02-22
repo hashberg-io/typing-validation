@@ -21,6 +21,12 @@ if sys.version_info[1] >= 9:
 else:
     from typing_extensions import TypedDict
 
+if sys.version_info[1] >= 10:
+    from types import UnionType
+else:
+    UnionType = None
+
+
 _basic_types = [
     bool, int, float, complex, str, bytes, bytearray,
     list, tuple, set, frozenset, dict, type(None)
@@ -402,3 +408,15 @@ def test_subtype() -> None:
         validate(10, typing.Type[int])
     with pytest.raises(TypeError):
         validate(10, typing.Type[typing.Union[str, float]])
+
+@pytest.mark.parametrize("val, ts", _union_cases)
+def test_union_type_cases(val: typing.Any, ts: typing.List[typing.Any]) -> None:
+    if UnionType is not None:
+        for t in ts:
+            members = t.__args__
+            if not members:
+                continue
+            u = members[0]
+            for t in members[1:]:
+                u |= t
+            validate(val, u)

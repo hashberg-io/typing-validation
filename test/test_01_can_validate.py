@@ -4,6 +4,11 @@ import sys
 import typing
 import pytest
 
+if sys.version_info[1] >= 10:
+    from types import UnionType
+else:
+    UnionType = None
+
 from typing_validation import can_validate, validation_aliases
 from typing_validation.inspector import _typing_equiv
 from typing_validation.validation import _pseudotypes_dict
@@ -119,3 +124,19 @@ def test_subtype() -> None:
     assert can_validate(typing.Type[typing.Union[int,str]])
     assert can_validate(typing.Type[typing.Any])
     assert can_validate(typing.Type[typing.Union[typing.Any, str, int]])
+
+_union_cases_ts = sorted({
+    t for _, ts in _union_cases for t in ts
+}, key=repr)
+
+
+@pytest.mark.parametrize("t", _union_cases_ts)
+def test_union_type_cases(t: typing.Any) -> None:
+    if UnionType is not None:
+        members = t.__args__
+        if not members:
+            return
+        u = members[0]
+        for t in members[1:]:
+            u |= t
+        assert can_validate(u)
