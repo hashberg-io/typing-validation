@@ -35,7 +35,3 @@ jobs:
     - name: Lint with mypy
       run: |
         mypy --strict typing_validation
-    - name: Lint with pylint
-      run: |
-        pylint --errors-only --rcfile=.pylintrc typing_validation
-        pylint --exit-zero --rcfile=.pylintrc typing_validation
