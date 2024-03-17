@@ -4,8 +4,6 @@ from collections import deque, defaultdict
 import collections.abc as collections_abc
 import sys
 import typing
-from typing_extensions import Literal, TypedDict, Required, NotRequired
-
 import pytest
 
 from typing_validation import validate, validation_aliases
@@ -15,11 +13,20 @@ from typing_validation.validation import (
     _is_typed_dict,
 )
 
+if sys.version_info[1] >= 8:
+    from typing import Literal
+else:
+    from typing_extensions import Literal
+
+if sys.version_info[1] >= 9:
+    from typing import TypedDict
+else:
+    from typing_extensions import TypedDict
+
 if sys.version_info[1] >= 10:
     from types import UnionType
 else:
     UnionType = None
-
 
 _basic_types = [
     bool,
@@ -521,17 +528,6 @@ class TD2(TypedDict, total=False):
     x: str
     w: typing.List[str]
 
-
-class TD3(TypedDict, total=False):
-    x: Required[str]
-    w: typing.List[str]
-
-
-class TD4(TypedDict):
-    x: str
-    w: NotRequired[typing.List[str]]
-
-
 _typed_dict_cases: typing.Dict[typing.Any, typing.List[typing.Any]] = {}
 _typed_dict_cases[TD1b] = [
     {"x": 1, "y": 1.5, "z": ["hello", "bye bye"]},
@@ -550,14 +546,27 @@ _typed_dict_cases[TD2] = [
     {"w": ["hello", "bye bye"]},
     {},
 ]
-_typed_dict_cases[TD3] = [
-    {"x": "hello", "w": ["hello", "bye bye"]},
-    {"x": "hello"},
-]
-_typed_dict_cases[TD4] = [
-    {"x": "hello", "w": ["hello", "bye bye"]},
-    {"x": "hello"},
-]
+
+if sys.version_info[1] >= 11:
+    from typing import Required, NotRequired
+
+    class TD3(TypedDict, total=False):
+        x: Required[str] # pyright: ignore
+        w: typing.List[str]
+
+
+    class TD4(TypedDict):
+        x: str
+        w: NotRequired[typing.List[str]] # pyright: ignore
+
+    _typed_dict_cases[TD3] = [
+        {"x": "hello", "w": ["hello", "bye bye"]},
+        {"x": "hello"},
+    ]
+    _typed_dict_cases[TD4] = [
+        {"x": "hello", "w": ["hello", "bye bye"]},
+        {"x": "hello"},
+    ]
 
 
 @pytest.mark.parametrize("t, vals", _typed_dict_cases.items())
@@ -589,16 +598,20 @@ _invalid_typed_dict_cases[TD2] = [
     {"w": 0},
     {"x": 0},
 ]
-_invalid_typed_dict_cases[TD3] = [
-    *_invalid_typed_dict_cases[TD2],
-    {"w": ["hello", "bye bye"]},
-    {},
-]
-_invalid_typed_dict_cases[TD4] = [
-    *_invalid_typed_dict_cases[TD2],
-    {"w": ["hello", "bye bye"]},
-    {},
-]
+
+
+if sys.version_info[1] >= 11:
+
+    _invalid_typed_dict_cases[TD3] = [
+        *_invalid_typed_dict_cases[TD2],
+        {"w": ["hello", "bye bye"]},
+        {},
+    ]
+    _invalid_typed_dict_cases[TD4] = [
+        *_invalid_typed_dict_cases[TD2],
+        {"w": ["hello", "bye bye"]},
+        {},
+    ]
 
 
 @pytest.mark.parametrize("t, vals", _invalid_typed_dict_cases.items())
