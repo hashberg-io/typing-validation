@@ -314,11 +314,15 @@ class TypeInspector:
     def _record_mapping(self, key_t: Any, value_t: Any) -> None:
         self._append_constructor_args(("mapping", None))
 
-    def _record_union(self, *member_ts: Any, use_UnionType: bool = False) -> None:
+    def _record_union(
+        self, *member_ts: Any, use_UnionType: bool = False
+    ) -> None:
         if use_UnionType:
             assert member_ts, "Cannot use UnionType with empty members."
             assert UnionType is not None, "Cannot use UnionType, version <= 3.9"
-        self._append_constructor_args(("union", (len(member_ts), use_UnionType)))
+        self._append_constructor_args(
+            ("union", (len(member_ts), use_UnionType))
+        )
 
     def _record_variadic_tuple(self, item_t: Any) -> None:
         self._append_constructor_args(("tuple", None))
