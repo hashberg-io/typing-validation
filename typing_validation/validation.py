@@ -19,7 +19,6 @@ from typing import (
     Union,
     get_type_hints,
 )
-import typing_extensions
 
 from .validation_failure import (
     InvalidNumpyDTypeValidationFailure,
@@ -54,6 +53,15 @@ else:
     NoneType = type(None)
     UnionType = None
 
+
+try:
+    import typing_extensions
+except ModuleNotFoundError:
+    _typing_modules = [typing]
+else:
+    _typing_modules = [typing, typing_extensions]
+
+
 _validation_aliases: typing.Dict[str, Any] = {}
 r"""
     Current context of type aliases, used to resolve forward references to type aliases in :func:`validate`.
@@ -83,6 +91,14 @@ def validation_aliases(**aliases: Any) -> collections.abc.Iterator[None]:
     finally:
         _validation_aliases = outer_validation_aliases
 
+
+def _get_type_classes(name: str) -> typing.List[typing.Type[Any]]:
+    """Get the classes for the specified type from typing and its possible backport modules."""
+    return [
+        getattr(module, name)
+        for module in _typing_modules
+        if hasattr(module, name)
+    ]
 
 # basic types
 _basic_types = frozenset(
@@ -496,16 +512,7 @@ def _is_typed_dict(t: type) -> bool:
     """
     Determines whether a type is a subclass of :class:`TypedDict`.
     """
-    if (
-        hasattr(typing_extensions, "_TypedDictMeta")
-        and t.__class__ == typing_extensions._TypedDictMeta
-    ):
-        return True
-    if hasattr(typing, "_TypedDictMeta") and t.__class__ == getattr(
-        typing, "_TypedDictMeta"
-    ):
-        return True
-    return False
+    return t.__class__ in _get_type_classes('_TypedDictMeta')
 
 
 def _validate_typed_dict(val: Any, t: type) -> None:
@@ -821,7 +828,7 @@ def validate(val: Any, t: Any) -> Literal[True]:
         if t.__origin__ is Union:
             _validate_union(val, t)
             return True
-        if t.__origin__ is Literal or t.__origin__ is typing_extensions.Literal:
+        if t.__origin__ in _get_type_classes('Literal'):
             _validate_literal(val, t)
             return True
         if t.__origin__ in _origins:
