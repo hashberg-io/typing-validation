@@ -9,36 +9,27 @@ import collections
 import collections.abc as collections_abc
 import sys
 import typing
-from typing import Any, Optional, TypeVar, Union, get_type_hints
+from typing import Any, Literal, Optional, TypeVar, Union, get_type_hints
 
-if sys.version_info[1] >= 8:
-    from typing import Literal
-else:
-    from typing_extensions import Literal
 
-if sys.version_info[1] >= 9:
-    TypeConstructorArgs = Union[
-        typing.Tuple[Literal["none"], None],
-        typing.Tuple[Literal["any"], None],
-        typing.Tuple[Literal["type"], type],
-        typing.Tuple[
-            Literal["type"], typing.Tuple[type, Literal["tuple"], Optional[int]]
-        ],
-        typing.Tuple[Literal["type"], typing.Tuple[type, Literal["mapping"], None]],
-        typing.Tuple[Literal["type"], typing.Tuple[type, Literal["collection"], None]],
-        typing.Tuple[Literal["literal"], typing.Tuple[Any, ...]],
-        typing.Tuple[Literal["collection"], None],
-        typing.Tuple[Literal["mapping"], None],
-        typing.Tuple[Literal["typed-dict"], type],
-        typing.Tuple[Literal["typevar"], TypeVar],
-        typing.Tuple[Literal["union"], tuple[int, bool]],
-        typing.Tuple[Literal["tuple"], Optional[int]],
-        typing.Tuple[Literal["user-class"], Optional[int]],
-        typing.Tuple[Literal["alias"], str],
-        typing.Tuple[Literal["unsupported"], Any],
-    ]
-else:
-    TypeConstructorArgs = typing.Tuple[str, Any]
+TypeConstructorArgs = Union[
+    typing.Tuple[Literal["none"], None],
+    typing.Tuple[Literal["any"], None],
+    typing.Tuple[Literal["type"], type],
+    typing.Tuple[Literal["type"], typing.Tuple[type, Literal["tuple"], Optional[int]]],
+    typing.Tuple[Literal["type"], typing.Tuple[type, Literal["mapping"], None]],
+    typing.Tuple[Literal["type"], typing.Tuple[type, Literal["collection"], None]],
+    typing.Tuple[Literal["literal"], typing.Tuple[Any, ...]],
+    typing.Tuple[Literal["collection"], None],
+    typing.Tuple[Literal["mapping"], None],
+    typing.Tuple[Literal["typed-dict"], type],
+    typing.Tuple[Literal["typevar"], TypeVar],
+    typing.Tuple[Literal["union"], tuple[int, bool]],
+    typing.Tuple[Literal["tuple"], Optional[int]],
+    typing.Tuple[Literal["user-class"], Optional[int]],
+    typing.Tuple[Literal["alias"], str],
+    typing.Tuple[Literal["unsupported"], Any],
+]
 
 if sys.version_info[1] >= 10:
     from types import UnionType

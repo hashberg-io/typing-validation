@@ -7,7 +7,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import collections
 import collections.abc as collections_abc
-from keyword import iskeyword
+from keyword import iskeyword, issoftkeyword
 import sys
 import typing
 from typing import (
@@ -18,6 +18,8 @@ from typing import (
     TypeVar,
     Union,
     get_type_hints,
+    Literal,
+    Protocol,
 )
 
 from .validation_failure import (
@@ -33,26 +35,11 @@ from .validation_failure import (
 )
 from .inspector import TypeInspector
 
-if sys.version_info[1] >= 8:
-    from typing import Literal, Protocol
-else:
-    from typing_extensions import Literal, Protocol
-
-if sys.version_info[1] >= 9:
-    from keyword import issoftkeyword
-else:
-
-    def issoftkeyword(s: str) -> bool:
-        r"""Dummy implementation for issoftkeyword in Python 3.7 and 3.8."""
-        return s == "_"
-
-
 if sys.version_info[1] >= 10:
     from types import NoneType, UnionType
 else:
     NoneType = type(None)
     UnionType = None
-
 
 try:
     import typing_extensions
@@ -334,37 +321,43 @@ def _numpy_dtype_error(val: Any, t: Any) -> TypeError:
     return error
 
 
-# def _missing_args_msg(t: Any) -> str:
-#     """Error message for missing :attr:`__args__` attribute on a type ``t``."""
-#     return f"For type {repr(t)}, expected '__args__' attribute."  # pragma: nocover
+def _missing_args_msg(t: Any) -> str:
+    """Error message for missing :attr:`__args__` attribute on a type ``t``."""
+    return f"For type {repr(t)}, expected '__args__' attribute."  # pragma: nocover
 
 
-# def _wrong_args_num_msg(t: Any, num_args: int) -> str:
-#     """Error message for incorrect number of :attr:`__args__` on a type ``t``."""
-#     return f"For type {repr(t)}, expected '__args__' to be tuple with {num_args} elements."  # pragma: nocover
+def _wrong_args_num_msg(t: Any, num_args: int) -> str:
+    """Error message for incorrect number of :attr:`__args__` on a type ``t``."""
+    return f"For type {repr(t)}, expected '__args__' to be tuple with {num_args} elements."  # pragma: nocover
+
+
+def _inspect_type(val: TypeInspector, t: type) -> None:
+    """Basic validation using :func:`isinstance`"""
+    val._record_type(t)
 
 
 def _validate_type(val: Any, t: type) -> None:
     """Basic validation using :func:`isinstance`"""
-    if isinstance(val, TypeInspector):
-        val._record_type(t)
-        return
     if not isinstance(val, t):
         raise _type_error(val, t)
 
 
+def _inspect_collection(val: TypeInspector, t: Any, ordered: bool) -> None:
+    """Parametric collection validation (i.e. recursive validation of all items)."""
+    assert hasattr(t, "__args__"), _missing_args_msg(t)
+    t__args__ = t.__args__
+    assert isinstance(t__args__, tuple) and len(t__args__) == 1, _wrong_args_num_msg(
+        t, 1
+    )
+    item_t = t__args__[0]
+    val._record_collection(item_t)
+    _inspect(val, item_t)
+
+
 def _validate_collection(val: Any, t: Any, ordered: bool) -> None:
     """Parametric collection validation (i.e. recursive validation of all items)."""
-    # assert hasattr(t, "__args__"), _missing_args_msg(t)
     t__args__ = t.__args__
-    # assert isinstance(t__args__, tuple) and len(t__args__) == 1, _wrong_args_num_msg(
-    #     t, 1
-    # )
     item_t = t__args__[0]
-    if isinstance(val, TypeInspector):
-        val._record_collection(item_t)
-        validate(val, item_t)
-        return
     for idx, item in enumerate(val):
         try:
             validate(item, item_t)
@@ -372,19 +365,23 @@ def _validate_collection(val: Any, t: Any, ordered: bool) -> None:
             raise _idx_type_error(val, t, e, idx=idx, ordered=ordered) from None
 
 
+def _inspect_mapping(val: TypeInspector, t: Any) -> None:
+    """Parametric mapping validation (i.e. recursive validation of all keys and values)."""
+    assert hasattr(t, "__args__"), _missing_args_msg(t)
+    t__args__ = t.__args__
+    assert isinstance(t__args__, tuple) and len(t__args__) == 2, _wrong_args_num_msg(
+        t, 2
+    )
+    key_t, value_t = t__args__
+    val._record_mapping(key_t, value_t)
+    _inspect(val, key_t)
+    _inspect(val, value_t)
+
+
 def _validate_mapping(val: Any, t: Any) -> None:
     """Parametric mapping validation (i.e. recursive validation of all keys and values)."""
-    # assert hasattr(t, "__args__"), _missing_args_msg(t)
     t__args__ = t.__args__
-    # assert isinstance(t__args__, tuple) and len(t__args__) == 2, _wrong_args_num_msg(
-    #     t, 2
-    # )
     key_t, value_t = t__args__
-    if isinstance(val, TypeInspector):
-        val._record_mapping(key_t, value_t)
-        validate(val, key_t)
-        validate(val, value_t)
-        return
     for key, value in val.items():
         try:
             validate(key, key_t)
@@ -396,6 +393,30 @@ def _validate_mapping(val: Any, t: Any) -> None:
             raise _key_type_error(val, t, e, key=key) from None
 
 
+def _inspect_tuple(val: TypeInspector, t: Any) -> None:
+    """
+    Parametric tuple validation (i.e. recursive validation of all items).
+    Two cases:
+
+    - variadic tuple types: arbitrary number of items, all of same type
+    - fixed-length tuple types: fixed number of items, each with its individual type
+    """
+    assert hasattr(t, "__args__"), _missing_args_msg(t)
+    t__args__ = t.__args__
+    assert isinstance(
+        t__args__, tuple
+    ), f"For type {repr(t)}, expected '__args__' to be a tuple."
+    if ... in t__args__:  # variadic tuple
+        assert len(t__args__) == 2, _wrong_args_num_msg(t, 2)
+        item_t = t__args__[0]
+        val._record_variadic_tuple(item_t)
+        _inspect(val, item_t)
+    else:  # fixed-length tuple
+        val._record_fixed_tuple(*t__args__)
+        for item_t in t__args__:
+            _inspect(val, item_t)
+
+
 def _validate_tuple(val: Any, t: Any) -> None:
     """
     Parametric tuple validation (i.e. recursive validation of all items).
@@ -404,29 +425,16 @@ def _validate_tuple(val: Any, t: Any) -> None:
     - variadic tuple types: arbitrary number of items, all of same type
     - fixed-length tuple types: fixed number of items, each with its individual type
     """
-    # assert hasattr(t, "__args__"), _missing_args_msg(t)
     t__args__ = t.__args__
-    # assert isinstance(
-    #     t__args__, tuple
-    # ), f"For type {repr(t)}, expected '__args__' to be a tuple."
     if ... in t__args__:  # variadic tuple
         # assert len(t__args__) == 2, _wrong_args_num_msg(t, 2)
         item_t = t__args__[0]
-        if isinstance(val, TypeInspector):
-            val._record_variadic_tuple(item_t)
-            validate(val, item_t)
-            return
         for idx, item in enumerate(val):
             try:
                 validate(item, item_t)
             except TypeError as e:
                 raise _idx_type_error(val, t, e, idx=idx, ordered=True) from None
     else:  # fixed-length tuple
-        if isinstance(val, TypeInspector):
-            val._record_fixed_tuple(*t__args__)
-            for item_t in t__args__:
-                validate(val, item_t)
-            return
         if len(val) != len(t__args__):
             raise _type_error(val, t)
         for idx, (item_t, item) in enumerate(zip(t__args__, val)):
@@ -434,6 +442,25 @@ def _validate_tuple(val: Any, t: Any) -> None:
                 validate(item, item_t)
             except TypeError as e:
                 raise _idx_type_error(val, t, e, idx=idx, ordered=True) from None
+
+
+def _inspect_union(val: TypeInspector, t: Any, *, use_UnionType: bool = False) -> None:
+    """
+    Union type validation. Each type ``u`` listed in the union type ``t`` is checked:
+
+    - if ``val`` is an instance of ``t``, returns immediately without error
+    - otherwise, moves to the next ``u``
+
+    If ``val`` is not an instance of any of the types listed in the union, type error is raised.
+    """
+    assert hasattr(t, "__args__"), _missing_args_msg(t)
+    t__args__ = t.__args__
+    assert isinstance(
+        t__args__, tuple
+    ), f"For type {repr(t)}, expected '__args__' to be a tuple."
+    val._record_union(*t__args__, use_UnionType=use_UnionType)
+    for member_t in t__args__:
+        _inspect(val, member_t)
 
 
 def _validate_union(val: Any, t: Any, *, use_UnionType: bool = False) -> None:
@@ -445,16 +472,7 @@ def _validate_union(val: Any, t: Any, *, use_UnionType: bool = False) -> None:
 
     If ``val`` is not an instance of any of the types listed in the union, type error is raised.
     """
-    # assert hasattr(t, "__args__"), _missing_args_msg(t)
     t__args__ = t.__args__
-    # assert isinstance(
-    #     t__args__, tuple
-    # ), f"For type {repr(t)}, expected '__args__' to be a tuple."
-    if isinstance(val, TypeInspector):
-        val._record_union(*t__args__, use_UnionType=use_UnionType)
-        for member_t in t__args__:
-            validate(val, member_t)
-        return
     if not t__args__:
         return
     member_errors: typing.List[TypeError] = []
@@ -467,20 +485,32 @@ def _validate_union(val: Any, t: Any, *, use_UnionType: bool = False) -> None:
     raise _type_error(val, t, *member_errors, is_union=True)
 
 
+def _inspect_literal(val: TypeInspector, t: Any) -> None:
+    """
+    Literal type validation.
+    """
+    assert hasattr(t, "__args__"), _missing_args_msg(t)
+    t__args__ = t.__args__
+    assert isinstance(
+        t__args__, tuple
+    ), f"For type {repr(t)}, expected '__args__' to be a tuple."
+    val._record_literal(*t__args__)
+
+
 def _validate_literal(val: Any, t: Any) -> None:
     """
     Literal type validation.
     """
-    # assert hasattr(t, "__args__"), _missing_args_msg(t)
-    t__args__ = t.__args__
-    # assert isinstance(
-    #     t__args__, tuple
-    # ), f"For type {repr(t)}, expected '__args__' to be a tuple."
-    if isinstance(val, TypeInspector):
-        val._record_literal(*t__args__)
-        return
-    if val not in t__args__:
+    if val not in t.__args__:
         raise _type_error(val, t)
+
+
+def _inspect_alias(val: TypeInspector, t_alias: str) -> None:
+    r"""
+    Validation of type aliases within the context provided by :func:`validation`
+    """
+    _validation_aliases[t_alias]
+    val._record_alias(t_alias)
 
 
 def _validate_alias(val: Any, t_alias: str) -> None:
@@ -488,9 +518,6 @@ def _validate_alias(val: Any, t_alias: str) -> None:
     Validation of type aliases within the context provided by :func:`validation`
     """
     t = _validation_aliases[t_alias]
-    if isinstance(val, TypeInspector):
-        val._record_alias(t_alias)
-        return
     nested_error: Optional[TypeError] = None
     try:
         validate(val, t)
@@ -507,17 +534,23 @@ def _is_typed_dict(t: type) -> bool:
     return t.__class__ in _get_type_classes("_TypedDictMeta")
 
 
+def _inspect_typed_dict(val: TypeInspector, t: type) -> None:
+    """
+    Validation of :class:`TypedDict` subclasses.
+    """
+    annotations = get_type_hints(t)
+    getattr(t, "__required_keys__")
+    val._record_typed_dict(t)
+    for k, val_t in annotations.items():
+        _inspect(val, val_t)
+
+
 def _validate_typed_dict(val: Any, t: type) -> None:
     """
     Validation of :class:`TypedDict` subclasses.
     """
     annotations = get_type_hints(t)
     required_keys: frozenset[str] = getattr(t, "__required_keys__")
-    if isinstance(val, TypeInspector):
-        val._record_typed_dict(t)
-        for k, val_t in annotations.items():
-            validate(val, val_t)
-        return
     # 1. Validate that `val`` is a mapping with string keys:
     try:
         validate(val, typing.Mapping[str, typing.Any])
@@ -536,23 +569,26 @@ def _validate_typed_dict(val: Any, t: type) -> None:
                 raise _key_type_error(val, t, e, key=k) from None
 
 
-def _validate_user_class(val: Any, t: Any) -> None:
-    # assert hasattr(t, "__args__"), _missing_args_msg(t)
+def _inspect_user_class(val: TypeInspector, t: Any) -> None:
+    assert hasattr(t, "__args__"), _missing_args_msg(t)
     t__args__ = t.__args__
     t__origin__ = t.__origin__
-    # assert isinstance(
-    #     t__args__, tuple
-    # ), f"For type {repr(t)}, expected '__args__' to be a tuple."
-    if isinstance(val, TypeInspector):
-        if t__origin__ is type:
-            if len(t__args__) != 1 or not _can_validate_subtype_of(t__args__[0]):
-                val._record_unsupported_type(t)
-                return
-        val._record_pending_type_generic(t__origin__)
-        val._record_user_class(*t__args__)
-        for arg in t__args__:
-            validate(val, arg)
-        return
+    assert isinstance(
+        t__args__, tuple
+    ), f"For type {repr(t)}, expected '__args__' to be a tuple."
+    if t__origin__ is type:
+        if len(t__args__) != 1 or not _can_validate_subtype_of(t__args__[0]):
+            val._record_unsupported_type(t)
+            return
+    val._record_pending_type_generic(t__origin__)
+    val._record_user_class(*t__args__)
+    for arg in t__args__:
+        _inspect(val, arg)
+
+
+def _validate_user_class(val: Any, t: Any) -> None:
+    t__args__ = t.__args__
+    t__origin__ = t.__origin__
     _validate_type(val, t__origin__)
     if t__origin__ is type:
         if len(t__args__) != 1:
@@ -656,44 +692,57 @@ def _extract_dtypes(t: Any) -> typing.Sequence[Any]:
     raise TypeError()
 
 
+def _inspect_numpy_array(val: TypeInspector, t: Any) -> None:
+    assert hasattr(t, "__args__"), _missing_args_msg(t)
+    t__args__ = t.__args__
+    assert len(t.__args__) == 2, _wrong_args_num_msg(t, 2)
+    dtype_t_container = t__args__[1]
+    assert hasattr(dtype_t_container, "__args__"), _missing_args_msg(dtype_t_container)
+    assert len(dtype_t_container.__args__) == 1, _wrong_args_num_msg(
+        dtype_t_container, 1
+    )
+    dtype_t = dtype_t_container.__args__[0]
+    try:
+        _extract_dtypes(dtype_t)
+    except TypeError:
+        val._record_unsupported_type(t)
+        return
+    val._record_pending_type_generic(t.__origin__)
+    val._record_user_class(*t__args__)
+    for arg in t__args__:
+        _inspect(val, arg)
+
+
 def _validate_numpy_array(val: Any, t: Any) -> None:
     import numpy as np  # pylint: disable = import-outside-toplevel
-    if not isinstance(val, TypeInspector):
-        _validate_type(val, np.ndarray)
-    # assert hasattr(t, "__args__"), _missing_args_msg(t)
+
+    _validate_type(val, np.ndarray)
     t__args__ = t.__args__
-    # assert len(t.__args__) == 2, _wrong_args_num_msg(t, 2)
     dtype_t_container = t__args__[1]
-    # assert hasattr(dtype_t_container, "__args__"), _missing_args_msg(dtype_t_container)
-    # assert len(dtype_t_container.__args__) == 1, _wrong_args_num_msg(
-    #     dtype_t_container, 1
-    # )
     dtype_t = dtype_t_container.__args__[0]
     try:
         dtypes = _extract_dtypes(dtype_t)
     except TypeError:
-        if isinstance(val, TypeInspector):
-            val._record_unsupported_type(t)
-            return
         raise _unsupported_type_error(
             t, f"Unsupported NumPy dtype {dtype_t!r}"
         ) from None
-    if isinstance(val, TypeInspector):
-        val._record_pending_type_generic(t.__origin__)
-        val._record_user_class(*t__args__)
-        for arg in t__args__:
-            validate(val, arg)
-        return
     val_dtype = val.dtype
     if any(dtype is Any or np.issubdtype(val_dtype, dtype) for dtype in dtypes):
         return
     raise _numpy_dtype_error(val, t)
 
 
+def _inspect_typevar(val: TypeInspector, t: TypeVar) -> None:
+    val._record_typevar(t)
+    bound = t.__bound__
+    if bound is not None:
+        try:
+            _inspect(val, bound)
+        except TypeError as e:
+            raise _typevar_error(val, t, e) from None
+
+
 def _validate_typevar(val: Any, t: TypeVar) -> None:
-    if isinstance(val, TypeInspector):
-        val._record_typevar(t)
-        pass
     bound = t.__bound__
     if bound is not None:
         try:
@@ -738,6 +787,103 @@ def _validate_typevar(val: Any, t: TypeVar) -> None:
 #     raise _type_error(val, t, is_union=True)
 
 
+def _inspect(val: TypeInspector, t: Any) -> Literal[True]:
+    # pylint: disable = too-many-return-statements, too-many-branches, too-many-statements
+    if not isinstance(t, Hashable):
+        val._record_unsupported_type(t)
+        return True
+    if t is typing.Type:
+        # Replace non-generic 'Type' with non-generic 'type':
+        t = type
+    if t in _basic_types:
+        # speed things up for the likely most common case
+        _inspect_type(val, typing.cast(type, t))
+        return True
+    if t is None or t is NoneType:
+        val._record_none()
+        return True
+    if t in _pseudotypes:
+        _inspect_type(val, typing.cast(type, t))
+        return True
+    if t is Any:
+        val._record_any()
+        return True
+    if isinstance(t, TypeVar):
+        _inspect_typevar(val, t)
+        return True
+    if UnionType is not None and isinstance(t, UnionType):
+        _inspect_union(val, t, use_UnionType=True)
+        return True
+    if hasattr(t, "__origin__"):  # parametric types
+        t__origin__ = t.__origin__
+        if t__origin__ is Union:
+            _inspect_union(val, t)
+            return True
+        if t__origin__ in _get_type_classes("Literal"):
+            _inspect_literal(val, t)
+            return True
+        if t__origin__ in _origins:
+            val._record_pending_type_generic(t__origin__)
+            if t__origin__ in _collection_origins:
+                ordered = t__origin__ in _ordered_collection_origins
+                _inspect_collection(val, t, ordered)
+                return True
+            if t__origin__ in _mapping_origins:
+                _inspect_mapping(val, t)
+                return True
+            if t__origin__ is tuple:
+                _inspect_tuple(val, t)
+                return True
+            if t__origin__ in _iterator_origins:
+                _inspect_collection(val, t, ordered=False)
+                # Item type cannot be validated for iterators (use validated_iter)
+                return True
+            if t__origin__ in _maybe_collection_origins and isinstance(
+                val, typing.Collection
+            ):
+                _inspect_collection(val, t, ordered=False)
+                return True
+        elif isinstance(t__origin__, type):
+            try:
+                import numpy as np  # pylint: disable = import-outside-toplevel
+
+                if issubclass(t__origin__, np.ndarray):
+                    _inspect_numpy_array(val, t)
+                    return True
+            except ModuleNotFoundError:
+                pass
+            _inspect_user_class(val, t)
+            return True
+    elif isinstance(t, type):
+        # The `isinstance(t, type)` case goes after the `hasattr(t, "__origin__")` case:
+        # e.g. `isinstance(list[int], type)` in 3.10, but we want to validate `list[int]`
+        # as a parametric type, not merely as `list` (which is what `_validate_type` does).
+        if Protocol in t.__mro__:  # type: ignore[comparison-overlap]
+            if hasattr(t, "_is_runtime_protocol") and getattr(
+                t, "_is_runtime_protocol"
+            ):
+                _inspect_type(val, t)
+                return True
+            val._record_unsupported_type(t)
+            return True
+        elif _is_typed_dict(t):
+            _inspect_typed_dict(val, t)
+            return True
+        else:
+            _inspect_type(val, t)
+            return True
+    elif isinstance(t, (str, ForwardRef)):
+        if isinstance(t, str):
+            t_alias: str = t
+        else:
+            t_alias = t.__forward_arg__
+        if t_alias in _validation_aliases:
+            _inspect_alias(val, t_alias)
+            return True
+    val._record_unsupported_type(t)
+    return True
+
+
 def validate(val: Any, t: Any) -> Literal[True]:
     """
     Performs runtime type-checking for the value ``val`` against type ``t``.
@@ -776,9 +922,6 @@ def validate(val: Any, t: Any) -> Literal[True]:
     # pylint: disable = too-many-return-statements, too-many-branches, too-many-statements
     unsupported_type_error: Optional[UnsupportedTypeError] = None
     if not isinstance(t, Hashable):
-        if isinstance(val, TypeInspector):
-            val._record_unsupported_type(t)
-            return True
         if unsupported_type_error is None:
             unsupported_type_error = _unsupported_type_error(
                 t, "Type is not hashable."
@@ -792,9 +935,6 @@ def validate(val: Any, t: Any) -> Literal[True]:
         _validate_type(val, typing.cast(type, t))
         return True
     if t is None or t is NoneType:
-        if isinstance(val, TypeInspector):
-            val._record_none()
-            return True
         if val is not None:
             raise _type_error(val, t)
         return True
@@ -802,9 +942,6 @@ def validate(val: Any, t: Any) -> Literal[True]:
         _validate_type(val, typing.cast(type, t))
         return True
     if t is Any:
-        if isinstance(val, TypeInspector):
-            val._record_any()
-            return True
         return True
     if isinstance(t, TypeVar):
         _validate_typevar(val, t)
@@ -821,10 +958,7 @@ def validate(val: Any, t: Any) -> Literal[True]:
             _validate_literal(val, t)
             return True
         if t__origin__ in _origins:
-            if isinstance(val, TypeInspector):
-                val._record_pending_type_generic(t__origin__)
-            else:
-                _validate_type(val, t__origin__)
+            _validate_type(val, t__origin__)
             if t__origin__ in _collection_origins:
                 ordered = t__origin__ in _ordered_collection_origins
                 _validate_collection(val, t, ordered)
@@ -836,8 +970,6 @@ def validate(val: Any, t: Any) -> Literal[True]:
                 _validate_tuple(val, t)
                 return True
             if t__origin__ in _iterator_origins:
-                if isinstance(val, TypeInspector):
-                    _validate_collection(val, t, ordered=False)
                 # Item type cannot be validated for iterators (use validated_iter)
                 return True
             if t__origin__ in _maybe_collection_origins and isinstance(
@@ -865,9 +997,6 @@ def validate(val: Any, t: Any) -> Literal[True]:
                 t, "_is_runtime_protocol"
             ):
                 _validate_type(val, t)
-                return True
-            if isinstance(val, TypeInspector):
-                val._record_unsupported_type(t)
                 return True
             unsupported_type_error = _unsupported_type_error(
                 t, "Protocol class is not runtime-checkable."
@@ -900,32 +1029,23 @@ def validate(val: Any, t: Any) -> Literal[True]:
         else:
             _validate_alias(val, t_alias)
             return True
-    if isinstance(val, TypeInspector):
-        val._record_unsupported_type(t)
-        return True
     if unsupported_type_error is None:
         unsupported_type_error = _unsupported_type_error(t)  # pragma: nocover
     raise unsupported_type_error
 
 
-def can_validate(t: Any) -> TypeInspector:
+def can_validate(t: Any) -> bool:
     """
     Checks whether validation is supported for the given type ``t``: if not,
     :func:`validate` will raise :obj:`UnsupportedTypeError`.
-
-    .. warning::
-
-        The return type will be changed to :obj:`bool` in v1.3.0.
-        To obtain a :class:`TypeInspector` object, please use the newly
-        introduced :func:`inspect_type` instead.
 
     :param t: the type to be checked for validation support
     :type t: :obj:`~typing.Any`
 
     """
     inspector = TypeInspector()
-    validate(inspector, t)
-    return inspector
+    _inspect(inspector, t)
+    return bool(inspector)
 
 
 def inspect_type(t: Any) -> TypeInspector:
@@ -974,7 +1094,7 @@ def inspect_type(t: Any) -> TypeInspector:
 
     """
     inspector = TypeInspector()
-    validate(inspector, t)
+    _inspect(inspector, t)
     return inspector
 
 

@@ -8,7 +8,7 @@ from .inspector import TypeInspector, UnsupportedType
 from .validation import (
     validate,
     inspect_type,
-    can_validate,
+    inspect_type,
     validation_aliases,
     validated,
     validated_iter,
@@ -23,7 +23,7 @@ from .validation_failure import (
 __all__ = [
     "validate",
     "inspect_type",
-    "can_validate",
+    "inspect_type",
     "validation_aliases",
     "is_valid",
     "validated",

@@ -6,17 +6,8 @@ from __future__ import annotations
 
 import sys
 import typing
-from typing import Any, Mapping, Optional, Type, TypeVar
-
-if sys.version_info[1] >= 8:
-    from typing import Protocol
-else:
-    from typing_extensions import Protocol
-
-if sys.version_info[1] >= 9:
-    from collections.abc import Sequence
-else:
-    from typing import Sequence
+from typing import Any, Mapping, Optional, Protocol, Type, TypeVar
+from collections.abc import Sequence
 
 if sys.version_info[1] >= 11:
     from typing import Self

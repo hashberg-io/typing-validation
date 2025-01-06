@@ -9,7 +9,7 @@ if sys.version_info[1] >= 10:
 else:
     UnionType = None
 
-from typing_validation import can_validate, validation_aliases
+from typing_validation import inspect_type, validation_aliases
 from typing_validation.inspector import _typing_equiv
 from typing_validation.validation import _pseudotypes_dict
 
@@ -25,7 +25,7 @@ from .test_00_validate import (
 
 
 def assert_recorded_type(t: typing.Any) -> None:
-    _t = can_validate(t).recorded_type
+    _t = inspect_type(t).recorded_type
     if t is type(None):
         assert None is _t
     elif (
@@ -63,11 +63,11 @@ _valid_cases_ts = sorted(
 @pytest.mark.parametrize("t", _valid_cases_ts)
 def test_valid_cases(t: typing.Any) -> None:
     # ts = ts+[_pseudotypes_dict[t] for t in ts if t in _pseudotypes_dict]
-    assert can_validate(t), f"Should be able to validate {t}"
-    assert can_validate(
+    assert inspect_type(t), f"Should be able to validate {t}"
+    assert inspect_type(
         typing.Optional[t]
     ), f"Should be able to validate {typing.Optional[t]}"
-    str(can_validate(t))
+    str(inspect_type(t))
     assert_recorded_type(t)
 
 
@@ -78,11 +78,11 @@ _other_cases_ts = sorted(
 
 @pytest.mark.parametrize("t", _other_cases_ts)
 def test_other_cases(t: typing.Any) -> None:
-    assert can_validate(t), f"Should be able to validate {t}"
-    assert can_validate(
+    assert inspect_type(t), f"Should be able to validate {t}"
+    assert inspect_type(
         typing.Optional[t]
     ), f"Should be able to validate {typing.Optional[t]}"
-    str(can_validate(t))
+    str(inspect_type(t))
     assert_recorded_type(t)
 
 
@@ -92,11 +92,11 @@ _alias_cases_ts = sorted({t for _, ts in _alias_cases for t in ts}, key=repr)
 @pytest.mark.parametrize("t", _alias_cases_ts)
 def test_alias_cases(t: typing.Any) -> None:
     with validation_aliases(**_validation_aliases):
-        assert can_validate(t), f"Should be able to validate {t}"
-        assert can_validate(
+        assert inspect_type(t), f"Should be able to validate {t}"
+        assert inspect_type(
             typing.Optional[t]
         ), f"Should be able to validate {typing.Optional[t]}"
-        str(can_validate(t))
+        str(inspect_type(t))
         assert_recorded_type(t)
 
 
@@ -106,11 +106,11 @@ _typed_dict_cases_ts = sorted(_typed_dict_cases.keys(), key=repr)
 @pytest.mark.parametrize("t", _typed_dict_cases_ts)
 def test_typed_dict_cases(t: typing.Any) -> None:
     with validation_aliases(**_validation_aliases):
-        assert can_validate(t), f"Should be able to validate {t}"
-        assert can_validate(
+        assert inspect_type(t), f"Should be able to validate {t}"
+        assert inspect_type(
             typing.Optional[t]
         ), f"Should be able to validate {typing.Optional[t]}"
-        str(can_validate(t))
+        str(inspect_type(t))
         assert_recorded_type(t)
 
 
@@ -122,11 +122,11 @@ _user_class_cases_ts = sorted(
 
 @pytest.mark.parametrize("t", _user_class_cases_ts)
 def test_user_class_cases(t: typing.Any) -> None:
-    assert can_validate(t), f"Should be able to validate {t}"
-    assert can_validate(
+    assert inspect_type(t), f"Should be able to validate {t}"
+    assert inspect_type(
         typing.Optional[t]
     ), f"Should be able to validate {typing.Optional[t]}"
-    str(can_validate(t))
+    str(inspect_type(t))
     assert_recorded_type(t)
 
 
@@ -135,11 +135,11 @@ def test_numpy_array() -> None:
     import numpy as np
     import numpy.typing as npt
 
-    assert can_validate(npt.NDArray[np.uint8])
-    assert can_validate(npt.NDArray[typing.Union[np.uint8, np.float32]])
-    assert can_validate(npt.NDArray[typing.Union[typing.Any, np.float32]])
-    assert can_validate(npt.NDArray[typing.Any])
-    assert can_validate(
+    assert inspect_type(npt.NDArray[np.uint8])
+    assert inspect_type(npt.NDArray[typing.Union[np.uint8, np.float32]])
+    assert inspect_type(npt.NDArray[typing.Union[typing.Any, np.float32]])
+    assert inspect_type(npt.NDArray[typing.Any])
+    assert inspect_type(
         npt.NDArray[
             typing.Union[
                 np.float32,
@@ -151,22 +151,22 @@ def test_numpy_array() -> None:
 
 def test_typevar() -> None:
     T = typing.TypeVar("T")
-    assert can_validate(T)
+    assert inspect_type(T)
     IntT = typing.TypeVar("IntT", bound=int)
-    assert can_validate(IntT)
+    assert inspect_type(IntT)
     IntStrSeqT = typing.TypeVar(
         "IntStrSeqT", bound=typing.Sequence[typing.Union[int, str]]
     )
-    assert can_validate(IntStrSeqT)
+    assert inspect_type(IntStrSeqT)
 
 
 def test_subtype() -> None:
-    assert can_validate(type)
-    assert can_validate(typing.Type)
-    assert can_validate(typing.Type[int])
-    assert can_validate(typing.Type[typing.Union[int, str]])
-    assert can_validate(typing.Type[typing.Any])
-    assert can_validate(typing.Type[typing.Union[typing.Any, str, int]])
+    assert inspect_type(type)
+    assert inspect_type(typing.Type)
+    assert inspect_type(typing.Type[int])
+    assert inspect_type(typing.Type[typing.Union[int, str]])
+    assert inspect_type(typing.Type[typing.Any])
+    assert inspect_type(typing.Type[typing.Union[typing.Any, str, int]])
 
 
 _union_cases_ts = sorted({t for _, ts in _union_cases for t in ts}, key=repr)
@@ -181,4 +181,4 @@ def test_union_type_cases(t: typing.Any) -> None:
         u = members[0]
         for t in members[1:]:
             u |= t
-        assert can_validate(u)
+        assert inspect_type(u)
