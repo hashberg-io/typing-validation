@@ -24,12 +24,8 @@ if sys.version_info[1] >= 9:
         typing.Tuple[
             Literal["type"], typing.Tuple[type, Literal["tuple"], Optional[int]]
         ],
-        typing.Tuple[
-            Literal["type"], typing.Tuple[type, Literal["mapping"], None]
-        ],
-        typing.Tuple[
-            Literal["type"], typing.Tuple[type, Literal["collection"], None]
-        ],
+        typing.Tuple[Literal["type"], typing.Tuple[type, Literal["mapping"], None]],
+        typing.Tuple[Literal["type"], typing.Tuple[type, Literal["collection"], None]],
         typing.Tuple[Literal["literal"], typing.Tuple[Any, ...]],
         typing.Tuple[Literal["collection"], None],
         typing.Tuple[Literal["mapping"], None],
@@ -92,9 +88,7 @@ class UnsupportedType(type):
     """
 
     def __class_getitem__(mcs, wrapped_type: Any) -> "UnsupportedType":
-        wrapper = type.__new__(
-            mcs, f"{mcs.__name__}[{wrapped_type}]", tuple(), {}
-        )
+        wrapper = type.__new__(mcs, f"{mcs.__name__}[{wrapped_type}]", tuple(), {})
         wrapper._wrapped_type = wrapped_type
         return wrapper
 
@@ -167,9 +161,7 @@ class TypeInspector:
         2. Unsupported types are not wrapped.
 
         """
-        return "".join(
-            line.strip() for line in self._repr(mark_unsupported=False)[0]
-        )
+        return "".join(line.strip() for line in self._repr(mark_unsupported=False)[0])
 
     def _recorded_type(self, idx: int) -> typing.Tuple[Any, int]:
         # pylint: disable = too-many-return-statements, too-many-branches
@@ -314,15 +306,11 @@ class TypeInspector:
     def _record_mapping(self, key_t: Any, value_t: Any) -> None:
         self._append_constructor_args(("mapping", None))
 
-    def _record_union(
-        self, *member_ts: Any, use_UnionType: bool = False
-    ) -> None:
+    def _record_union(self, *member_ts: Any, use_UnionType: bool = False) -> None:
         if use_UnionType:
             assert member_ts, "Cannot use UnionType with empty members."
             assert UnionType is not None, "Cannot use UnionType, version <= 3.9"
-        self._append_constructor_args(
-            ("union", (len(member_ts), use_UnionType))
-        )
+        self._append_constructor_args(("union", (len(member_ts), use_UnionType)))
 
     def _record_variadic_tuple(self, item_t: Any) -> None:
         self._append_constructor_args(("tuple", None))
@@ -353,10 +341,7 @@ class TypeInspector:
 
         :meta public:
         """
-        return (
-            "TypeInspector instance for the following type:\n"
-            + self.type_structure
-        )
+        return "TypeInspector instance for the following type:\n" + self.type_structure
 
     def _repr(
         self, idx: int = 0, level: int = 0, *, mark_unsupported: bool = True
@@ -386,9 +371,7 @@ class TypeInspector:
             return [indent + f"{repr(param)}"], idx
         if tag == "literal":
             assert isinstance(param, tuple)
-            return [
-                indent + f"Literal[{', '.join(repr(p) for p in param)}]"
-            ], idx
+            return [indent + f"Literal[{', '.join(repr(p) for p in param)}]"], idx
         if tag == "typevar":
             assert isinstance(param, TypeVar)
             name = param.__name__
@@ -428,15 +411,10 @@ class TypeInspector:
             for k in get_type_hints(t):
                 value_lines, idx = self._repr(idx + 1, level + 1)
                 opt_str = (
-                    basic_indent
-                    if k in required_keys
-                    else basic_indent[:-1] + "?"
+                    basic_indent if k in required_keys else basic_indent[:-1] + "?"
                 )
                 value_lines[0] = (
-                    indent
-                    + opt_str
-                    + f"{k}: "
-                    + value_lines[0][next_indent_len:]
+                    indent + opt_str + f"{k}: " + value_lines[0][next_indent_len:]
                 )
                 item_lines_list.extend(value_lines)
             lines = [indent + t.__name__ + " {", *item_lines_list, indent + "}"]
@@ -444,9 +422,7 @@ class TypeInspector:
         pending_type = None
         if tag == "type":
             if not isinstance(param, tuple):
-                param_name = (
-                    param.__name__ if isinstance(param, type) else str(param)
-                )
+                param_name = param.__name__ if isinstance(param, type) else str(param)
                 return [indent + param_name], idx
             pending_type, tag, param = param
         if tag == "collection":

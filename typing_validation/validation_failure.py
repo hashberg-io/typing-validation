@@ -77,9 +77,7 @@ class ValidationFailure:
         instance._val = val
         instance._t = t
         instance._causes = causes
-        instance._type_aliases = (
-            {**type_aliases} if type_aliases is not None else {}
-        )
+        instance._type_aliases = {**type_aliases} if type_aliases is not None else {}
         return instance
 
     @property
@@ -179,9 +177,7 @@ class ValidationFailure:
 
         def tree_builder(val: Any, t: Any, acc: Tree) -> Tree:
             label = Text(f"({repr(t)}, {repr(val)})")
-            return acc.add(
-                label
-            )  # see https://rich.readthedocs.io/en/latest/tree.html
+            return acc.add(label)  # see https://rich.readthedocs.io/en/latest/tree.html
 
         self.visit(tree_builder, failure_tree)
         rich.print(failure_tree)
@@ -211,8 +207,7 @@ class ValidationFailure:
     def _str_header_lines(self, top_level: bool) -> list[str]:
         if top_level:
             lines = [
-                "Runtime validation error raised by validate(val, t), "
-                "details below."
+                "Runtime validation error raised by validate(val, t), " "details below."
             ]
         else:
             lines = []
@@ -253,9 +248,7 @@ class UnionValidationFailure(ValidationFailure):
         *causes: ValidationFailure,
         type_aliases: Optional[Mapping[str, Any]] = None,
     ) -> Self:
-        instance = super().__new__(
-            cls, val, t, *causes, type_aliases=type_aliases
-        )
+        instance = super().__new__(cls, val, t, *causes, type_aliases=type_aliases)
         assert all(cause.val is val for cause in causes)
         return instance
 
@@ -296,9 +289,7 @@ class ValidationFailureAtIdx(ValidationFailure):
         if ordered:
             assert isinstance(val, Sequence)
         assert idx in range(len(val))
-        instance = super().__new__(
-            cls, val, t, idx_cause, type_aliases=type_aliases
-        )
+        instance = super().__new__(cls, val, t, idx_cause, type_aliases=type_aliases)
         instance._idx = idx
         instance._ordered = ordered
         return instance
@@ -344,9 +335,7 @@ class ValidationFailureAtKey(ValidationFailure):
         # pylint: disable = too-many-arguments
         assert isinstance(val, Mapping)
         assert key in val
-        instance = super().__new__(
-            cls, val, t, key_cause, type_aliases=type_aliases
-        )
+        instance = super().__new__(cls, val, t, key_cause, type_aliases=type_aliases)
         instance._key = key
         return instance
 
@@ -445,9 +434,7 @@ class TypeVarBoundValidationFailure(ValidationFailure):
         type_aliases: Optional[Mapping[str, Any]] = None,
     ) -> Self:
         # pylint: disable = too-many-arguments
-        instance = super().__new__(
-            cls, val, t, bound_cause, type_aliases=type_aliases
-        )
+        instance = super().__new__(cls, val, t, bound_cause, type_aliases=type_aliases)
         return instance
 
     def _str_main_msg(self, type_quals: tuple[str, ...] = ()) -> str:
