@@ -228,7 +228,7 @@ def _unsupported_type_error(
     """
     Error for unsupported types, with optional explanation.
     """
-    msg = "Unsupported validation for type {t!r}."
+    msg = f"Unsupported validation for type {t!r}."
     if explanation is not None:
         msg += " " + explanation
     return UnsupportedTypeError(msg)
@@ -658,6 +658,7 @@ def _extract_dtypes(t: Any) -> typing.Sequence[Any]:
 
 def _validate_numpy_array(val: Any, t: Any) -> None:
     import numpy as np  # pylint: disable = import-outside-toplevel
+
     if not isinstance(val, TypeInspector):
         _validate_type(val, np.ndarray)
     # assert hasattr(t, "__args__"), _missing_args_msg(t)
@@ -676,7 +677,7 @@ def _validate_numpy_array(val: Any, t: Any) -> None:
             val._record_unsupported_type(t)
             return
         raise _unsupported_type_error(
-            t, f"Unsupported NumPy dtype {dtype_t!r}"
+            t, f"Unsupported NumPy dtype {dtype_t!r}."
         ) from None
     if isinstance(val, TypeInspector):
         val._record_pending_type_generic(t.__origin__)
@@ -685,9 +686,10 @@ def _validate_numpy_array(val: Any, t: Any) -> None:
             validate(val, arg)
         return
     val_dtype = val.dtype
-    if any(dtype is Any or np.issubdtype(val_dtype, dtype) for dtype in dtypes):
-        return
-    raise _numpy_dtype_error(val, t)
+    if not any(dtype is Any or np.issubdtype(val_dtype, dtype) for dtype in dtypes):
+        raise _numpy_dtype_error(val, t)
+    validate(val.shape, t__args__[0])
+    return
 
 
 def _validate_typevar(val: Any, t: TypeVar) -> None:

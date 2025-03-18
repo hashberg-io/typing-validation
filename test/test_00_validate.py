@@ -695,6 +695,27 @@ def test_numpy_array_error() -> None:
     with pytest.raises(TypeError):
         validate(val, npt.NDArray[np.str_])
 
+def test_numpy_array_shape() -> None:
+    # pylint: disable = import-outside-toplevel
+    import numpy as np
+    val = np.zeros(5, dtype=np.uint8)
+    validate(val, np.ndarray[typing.Any, np.dtype[np.uint8]])
+    validate(val, np.ndarray[tuple, np.dtype[np.uint8]])
+    validate(val, np.ndarray[tuple[typing.Any, ...], np.dtype[np.uint8]])
+    validate(val, np.ndarray[tuple[typing.Any], np.dtype[np.uint8]])
+    validate(val, np.ndarray[tuple[int, ...], np.dtype[np.uint8]])
+    validate(val, np.ndarray[tuple[int], np.dtype[np.uint8]])
+    validate(val, np.ndarray[tuple[Literal[5], ...], np.dtype[np.uint8]])
+    validate(val, np.ndarray[tuple[Literal[5]], np.dtype[np.uint8]])
+    with pytest.raises(TypeError):
+        validate(val, np.ndarray[tuple[int, int], np.dtype[np.uint8]])
+    with pytest.raises(TypeError):
+        validate(val, np.ndarray[tuple[typing.Any, typing.Any], np.dtype[np.uint8]])
+    with pytest.raises(TypeError):
+        validate(val, np.ndarray[tuple[Literal[5], int], np.dtype[np.uint8]])
+    with pytest.raises(TypeError):
+        validate(val, np.ndarray[tuple[int, Literal[5]], np.dtype[np.uint8]])
+
 
 def test_typevar() -> None:
     T = typing.TypeVar("T")
