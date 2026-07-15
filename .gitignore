@@ -6,3 +6,5 @@ __pycache__
 docs/_build
 .vscode
 .claude
+.pytest_cache
+uv.lock

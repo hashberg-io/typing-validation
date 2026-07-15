@@ -28,10 +28,17 @@ build-backend = "hatchling.build"
 
 [tool.black]
 target-version = ["py314"]
+line-length = 80
+
+[tool.pytest.ini_options]
+testpaths = ["test"]
+xfail_strict = true
+filterwarnings = ["error"]
 
 [tool.mypy]
 python_version = "3.14"
 strict = true
+files = ["typing_validation", "test"]
 
 [tool.pyright]
 typeCheckingMode = "off"
@@ -47,4 +54,10 @@ only-include = ["typing_validation"]
 only-include = ["typing_validation", "README.md", "LICENSE"]
 
 [dependency-groups]
-dev = []
+dev = ["pytest >=8.0", "mypy >=1.14", "black >=24.0", "numpy >=2.0"]
+docs = [
+    "sphinx",
+    "sphinx-rtd-theme",
+    "sphinx-autodoc-typehints",
+    "typing_extensions",
+]
