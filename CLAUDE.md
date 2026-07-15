@@ -67,6 +67,11 @@ These are load-bearing. Violating any of them silently is how v1 got its bugs.
 Work for v2 lives on `v2`, branched from `main`. `main` still holds v1 (1.2.11).
 Milestones get sub-branches off `v2`, merged back when the milestone completes.
 
+## Waiting on Python 3.15
+
+- **`typing.TypeForm` replaces the `typing_extensions` import.** PEP 747 is already adopted: `validated` takes `TypeForm[T]`, imported under `TYPE_CHECKING` so the library keeps zero runtime dependencies (typeshed carries the stub, so mypy needs nothing installed, and the docs read annotations as strings). The one cost is that `get_type_hints` on those functions raises `NameError` until the name exists at runtime. `test_typeform.py` fails deliberately when `typing.TypeForm` appears, and says what to change.
+- **`TypeForm[T]` as a *checkable* type** — i.e. `validate(int | str, TypeForm[int | str])`. Not started, and not small: it means implementing PEP 747's subtyping rules, which is a genuinely different job from anything in 2.0 — every other form asks "is this value an X", this one asks "does this type form denote a subtype of X". It would subsume `_TYPE_ARG_EXPLANATION` in `validation.py`, since `Type[T]`'s restriction to classes and unions of classes exists precisely because `issubclass` cannot express the rest. Worth its own milestone, and worth deciding whether `Type[list[int]]` should then become supported.
+
 ## Deferred by agreement
 
 - **The `diagnose` message format** is unsettled, and deferred until the end of the 2.0 implementation.

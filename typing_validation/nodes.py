@@ -6,18 +6,20 @@ built from, its form, its interned children, and its memoised properties.
 
 Everything except :func:`~typing_validation.validate` is built on this one
 class. It is simultaneously the unit of interning, the thing
-:func:`~typing_validation.inspect_type` reports, the thing that will emit a
-closure in 2.1, the thing that will emit source in 2.2, and the thing that
-explains a failure. It can be all of those at once precisely because none of
-them is on a hot path — which is also why this module may share freely with
-them, and why it shares nothing with the interpreter.
+:func:`~typing_validation.inspect_type` reports, and the thing that explains a
+failure. It can be all of those at once precisely because none of them is on a
+hot path — which is also why this module may share freely with them, and why it
+shares nothing with the interpreter.
 """
 
+# The reusable validators hang off this class too, when they land: the closure
+# compositor and the source emitter are further methods on the node, for the same
+# reason the rest are. See DESIGN.md §3.3 and §3.4.
+
 import enum
-import typing
 from collections import defaultdict, deque
-from collections.abc import Callable as abc_Callable
 from collections.abc import (
+    Callable,
     Collection,
     Container,
     Iterable,
@@ -33,23 +35,32 @@ from types import GenericAlias
 from typing import (
     Annotated,
     Any,
+    ByteString,
+    final,
+    get_args,
+    get_origin,
+    is_protocol,
+    is_typeddict,
     Literal,
+    NamedTuple,
+    NewType,
     Self,
+    Tuple,
+    TypeAliasType,
     TypeVar,
     Union,
-    final,
-    is_typeddict,
 )
 
 from annotationlib import ForwardRef
 
+from . import _cache as cache
 from .plugins import (
     plugin_import,
     registered_components,
     registered_validator,
     unsupported_explanation,
 )
-from .resolution import resolve, strip_qualifiers
+from ._resolution import resolve, strip_qualifiers
 
 __all__ = ("TypeForm", "TypeNode", "node_for")
 
@@ -73,7 +84,7 @@ class TypeForm(enum.Enum):
     """A collection whose every item is checked against one type argument."""
 
     MAPPING = "mapping"
-    """A mapping whose keys and values are each checked against a type argument."""
+    """A mapping whose keys and values are each checked against an argument."""
 
     TUPLE = "tuple"
     """A fixed-length, variadic or empty tuple."""
@@ -127,7 +138,7 @@ class TypeForm(enum.Enum):
     """
 
     UNSUPPORTED = "unsupported"
-    """A type this library cannot validate against. Poisons whatever contains it."""
+    """A type we cannot validate against. Poisons whatever contains it."""
 
 
 _COLLECTION_ORIGINS = frozenset(
@@ -146,7 +157,7 @@ _COLLECTION_ORIGINS = frozenset(
 _MAPPING_ORIGINS = frozenset({dict, defaultdict, Mapping, MutableMapping})
 _ITERATOR_ORIGINS = frozenset({Iterator})
 _MAYBE_ITEM_ORIGINS = frozenset({Iterable, Container})
-_BYTESTRING_ORIGIN = typing.get_origin(typing.ByteString)
+_BYTESTRING_ORIGIN = get_origin(ByteString)
 
 
 @final
@@ -282,48 +293,44 @@ class TypeNode:
         return f"<TypeNode {self._t!r}: {self._form.value}{mark}>"
 
 
-_TIERS: list[dict[Any, TypeNode]] = [{}]
-"""
-The intern cache, innermost tier last.
-
-By default the cache lives forever and holds strong references, because types
-are usually module-level objects that outlive any cache anyway. Scoped caching
-pushes a tier; lookups consult the tiers innermost-first; every new node is
-created in the innermost tier; exiting drops that tier whole, in one operation,
-with no per-entry bookkeeping.
-
-The tiering is sound because **references only ever point outward**. A node
-created while a tier is active lives in that tier and may reference nodes in
-enclosing tiers, which outlive it. Nothing in an enclosing tier can reference
-into an inner one, because while the inner tier is active it is where all new
-nodes go. So dropping a tier can never leave a dangling reference behind it —
-and can never change an answer, only a cost.
-"""
-
-
-def _lookup(t: Any, /) -> TypeNode | None:
-    for tier in reversed(_TIERS):
-        node = tier.get(t)
-        if node is not None:
-            return node
-    return None
-
-
 def node_for(t: Any, /) -> TypeNode:
     """
     The interned node for a type, building it if it is not already cached.
-
-    :param t: the type to analyse.
     """
     fresh: list[TypeNode] = []
-    node = _build(t, fresh)
+    root, is_new = _intern(t, fresh)
+    if not is_new:
+        return root
+    # Iterative, for the same reason the interpreter is: a type can be deep. It
+    # is tempting to think depth only arrives via recursive aliases, which
+    # terminate at a name — but `list[list[...[int]]]` nested three thousand
+    # deep is an ordinary type with no recursion in it at all, and a recursive
+    # builder raises RecursionError on it while `validate` handles the matching
+    # value without blinking. Two mechanisms disagreeing about the same type,
+    # one of them by crashing, is exactly what the work stack exists to prevent.
+    pending = [root]
+    while pending:
+        node = pending.pop()
+        form, child_types, labels, reason = _classify(node._t)
+        node._form = form
+        node._labels = labels
+        node._reason = reason
+        if form is TypeForm.UNSUPPORTED:
+            node._supported = False
+        children: list[TypeNode] = []
+        for child_t in child_types:
+            child, child_is_new = _intern(child_t, fresh)
+            children.append(child)
+            if child_is_new:
+                pending.append(child)
+        node._children = tuple(children)
     _settle_support(fresh)
-    return node
+    return root
 
 
-def _build(t: Any, fresh: list[TypeNode], /) -> TypeNode:
+def _intern(t: Any, fresh: list[TypeNode], /) -> tuple[TypeNode, bool]:
     """
-    Intern a node for a type, then build its children.
+    The node for a type, and whether it was created here and so needs analysing.
 
     **Hash-cons before descending**: the node is published *before* its children
     exist, so a back-edge finds the in-progress node and construction
@@ -332,7 +339,7 @@ def _build(t: Any, fresh: list[TypeNode], /) -> TypeNode:
     in the cache, even when unhashable leaves sit inside the cycle.
     """
     try:
-        cached = _lookup(t)
+        cached = cache.lookup(t)
     except TypeError:
         # Unhashable, and so unshareable: Annotated[int, {"ge": 0}] is exactly
         # the pydantic-style idiom the Annotated decision exists to accommodate,
@@ -341,15 +348,13 @@ def _build(t: Any, fresh: list[TypeNode], /) -> TypeNode:
         # may cost, and may not change an answer.
         node = TypeNode(t)
         fresh.append(node)
-        _analyse(node, fresh)
-        return node
+        return node, True
     if cached is not None:
-        return cached
+        return cached, False
     node = TypeNode(t)
-    _TIERS[-1][t] = node
+    cache.store(t, node)
     fresh.append(node)
-    _analyse(node, fresh)
-    return node
+    return node, True
 
 
 def _settle_support(fresh: list[TypeNode], /) -> None:
@@ -382,59 +387,61 @@ def _settle_support(fresh: list[TypeNode], /) -> None:
                 changed = True
 
 
-def _unsupported(node: TypeNode, reason: str | None = None, /) -> None:
-    node._form = TypeForm.UNSUPPORTED
-    node._supported = False
-    node._reason = reason
+Classified = tuple[
+    TypeForm, tuple[Any, ...], tuple[str, ...] | None, str | None
+]
+"""
+What a type turns out to be: its form, the types of its children, names for
+those children where they have them, and why it is unsupported when it is.
+
+The children are *types*, not nodes. Classification is deliberately pure — it
+builds nothing and interns nothing — because that is what lets :func:`node_for`
+drive it from a work stack instead of recursing.
+"""
 
 
-def _analyse(node: TypeNode, fresh: list[TypeNode], /) -> None:
+def _plain(form: TypeForm, /) -> Classified:
+    return form, (), None, None
+
+
+def _with(form: TypeForm, *children: Any) -> Classified:
+    return form, children, None, None
+
+
+def _unsupported(reason: str | None = None, /) -> Classified:
+    return TypeForm.UNSUPPORTED, (), None, reason
+
+
+def _classify(t: Any, /) -> Classified:
     """
-    Determine a node's form and build its children.
+    What a type is, and what it is made of.
 
     This duplicates the interpreter's dispatch, deliberately and by design: the
     two share a specification rather than an implementation. Here the shape is
     chosen for clarity, because nothing on this path is hot; there it is chosen
     for speed. The conformance suite is what keeps them agreeing.
-
-    Recursion is safe here in a way it is not in the interpreter, because this
-    walks the *type*, which is shallow, rather than the *value*, which is not.
     """
-    t = node._t
     tt = type(t)
-
     if t is Any:
-        node._form = TypeForm.ANY
-        return
+        return _plain(TypeForm.ANY)
     if t is None or t is type(None):
-        node._form = TypeForm.NONE
-        return
-    if t is typing.NamedTuple:
-        node._form = TypeForm.ANY_NAMED_TUPLE
-        return
-    if tt is typing.TypeAliasType:
-        node._form = TypeForm.ALIAS
-        node._children = (_build(t.__value__, fresh),)
-        return
+        return _plain(TypeForm.NONE)
+    if t is NamedTuple:
+        return _plain(TypeForm.ANY_NAMED_TUPLE)
+    if tt is TypeAliasType:
+        return _with(TypeForm.ALIAS, t.__value__)
     if tt is TypeVar:
-        node._form = TypeForm.TYPE_VAR
         if t.__bound__ is not None:
-            node._children = (_build(t.__bound__, fresh),)
-        elif t.__constraints__:
-            node._children = (_build(Union[t.__constraints__], fresh),)
-        return
-    if tt is typing.NewType:
-        node._form = TypeForm.NEW_TYPE
-        node._children = (_build(t.__supertype__, fresh),)
-        return
+            return _with(TypeForm.TYPE_VAR, t.__bound__)
+        if t.__constraints__:
+            return _with(TypeForm.TYPE_VAR, Union[t.__constraints__])
+        return _plain(TypeForm.TYPE_VAR)
+    if tt is NewType:
+        return _with(TypeForm.NEW_TYPE, t.__supertype__)
     if isinstance(t, (str, ForwardRef)):
-        _unsupported(node, _INLINE_FORWARD_REF_REASON)
-        return
-
+        return _unsupported(_INLINE_FORWARD_REF_REASON)
     if tt is type or isinstance(t, type):
-        _analyse_class(node, t, fresh)
-        return
-
+        return _classify_class(t)
     if tt is GenericAlias:
         origin = t.__origin__
         args: tuple[Any, ...] = t.__args__
@@ -442,84 +449,125 @@ def _analyse(node: TypeNode, fresh: list[TypeNode], /) -> None:
         origin = Union
         args = t.__args__
     else:
-        origin = typing.get_origin(t)
-        args = typing.get_args(t)
-
+        origin = get_origin(t)
+        args = get_args(t)
     if origin is None:
-        _unsupported(node)
-    elif origin is Union:
-        node._form = TypeForm.UNION
-        node._children = tuple(_build(arg, fresh) for arg in args)
-    elif origin is Literal:
+        return _unsupported()
+    if origin is Union:
+        return TypeForm.UNION, args, None, None
+    if origin is Literal:
         # The children of a Literal are values, not types, so it has none.
-        node._form = TypeForm.LITERAL
-    elif origin is Annotated:
+        return _plain(TypeForm.LITERAL)
+    if origin is Annotated:
         # Not stripped: Annotated[int, Ge(0)] is a distinct type from int, keeps
         # its own identity and its own cache entry, and reports as written.
-        node._form = TypeForm.ANNOTATED
-        node._children = (_build(t.__origin__, fresh),)
-    elif origin in _COLLECTION_ORIGINS:
-        node._form = TypeForm.COLLECTION
-        node._children = tuple(_build(arg, fresh) for arg in args[:1])
-    elif origin in _MAPPING_ORIGINS:
-        node._form = TypeForm.MAPPING
-        node._children = tuple(_build(arg, fresh) for arg in args[:2])
-        if node._children:
-            node._labels = ("key", "value")
-    elif origin is tuple:
-        _analyse_tuple(node, t, args, fresh)
-    elif origin is type:
-        _analyse_type_of(node, t, args, fresh)
-    elif origin in _ITERATOR_ORIGINS:
-        node._form = TypeForm.ITERATOR
-    elif origin in _MAYBE_ITEM_ORIGINS:
-        node._form = TypeForm.MAYBE_ITEMS
-        node._children = tuple(_build(arg, fresh) for arg in args[:1])
-    elif origin is _BYTESTRING_ORIGIN:
-        node._form = TypeForm.CLASS
-    elif origin is abc_Callable:
-        _unsupported(node, _CALLABLE_REASON)
-    elif type(origin) is typing.TypeAliasType:
-        node._form = TypeForm.ALIAS
-        node._children = (_build(origin.__value__[args], fresh),)
-    elif isinstance(origin, type):
-        _analyse_parametrised_class(node, t, origin, args, fresh)
-    else:
-        _unsupported(node)
+        return _with(TypeForm.ANNOTATED, t.__origin__)
+    if origin in _COLLECTION_ORIGINS:
+        return TypeForm.COLLECTION, args[:1], None, None
+    if origin in _MAPPING_ORIGINS:
+        labels = ("key", "value") if args[:2] else None
+        return TypeForm.MAPPING, args[:2], labels, None
+    if origin is tuple:
+        return _classify_tuple(t, args)
+    if origin is type:
+        return _classify_type_of(args)
+    if origin in _ITERATOR_ORIGINS:
+        return _plain(TypeForm.ITERATOR)
+    if origin in _MAYBE_ITEM_ORIGINS:
+        return TypeForm.MAYBE_ITEMS, args[:1], None, None
+    if origin is _BYTESTRING_ORIGIN:
+        return _plain(TypeForm.CLASS)
+    if origin is Callable:
+        return _unsupported(_CALLABLE_REASON)
+    if type(origin) is TypeAliasType:
+        return _with(TypeForm.ALIAS, origin.__value__[args])
+    if isinstance(origin, type):
+        return _classify_parametrised_class(origin, args)
+    return _unsupported()
 
 
-def _analyse_class(node: TypeNode, t: Any, fresh: list[TypeNode], /) -> None:
+def _classify_class(t: Any, /) -> Classified:
     if is_typeddict(t):
-        node._form = TypeForm.TYPED_DICT
-        names: list[str] = []
-        children: list[TypeNode] = []
-        for name, ann in _typed_dict_fields(t):
-            names.append(name)
-            children.append(_build(ann, fresh))
-        node._labels = tuple(names)
-        node._children = tuple(children)
-        return
-    if typing.is_protocol(t):
+        fields = _typed_dict_fields(t)
+        names = tuple(name for name, _ in fields)
+        return TypeForm.TYPED_DICT, tuple(a for _, a in fields), names, None
+    if is_protocol(t):
         if not getattr(t, "_is_runtime_protocol", False):
-            _unsupported(node, _NON_RUNTIME_PROTOCOL_REASON)
-            return
-        node._form = TypeForm.PROTOCOL
-        return
+            return _unsupported(_NON_RUNTIME_PROTOCOL_REASON)
+        return _plain(TypeForm.PROTOCOL)
     if issubclass(t, tuple) and getattr(t, "_fields", None) is not None:
-        node._form = TypeForm.NAMED_TUPLE
-        names = []
-        children = []
         annotations = getattr(t, "__annotations__", {})
-        for name in t._fields:
-            ann = annotations.get(name)
-            if ann is None:
-                continue
-            names.append(name)
-            children.append(_build(resolve(ann, t), fresh))
-        node._labels = tuple(names)
-        node._children = tuple(children)
-        return
-    node._form = TypeForm.CLASS
+        pairs = [
+            (name, resolve(annotations[name], t))
+            for name in t._fields
+            if name in annotations
+        ]
+        names = tuple(name for name, _ in pairs)
+        return TypeForm.NAMED_TUPLE, tuple(a for _, a in pairs), names, None
+    return _plain(TypeForm.CLASS)
+
+
+def _classify_tuple(t: Any, args: tuple[Any, ...], /) -> Classified:
+    if not args:
+        # Bare typing.Tuple means any tuple; tuple[()] means the empty tuple.
+        # Both record no arguments, so only the spelling tells them apart.
+        return _plain(TypeForm.CLASS if t is Tuple else TypeForm.TUPLE)
+    if len(args) == 2 and args[1] is Ellipsis:
+        return TypeForm.TUPLE, args[:1], None, None
+    return TypeForm.TUPLE, args, None, None
+
+
+def _classify_type_of(args: tuple[Any, ...], /) -> Classified:
+    if not args:
+        return _plain(TypeForm.TYPE_OF)
+    (arg,) = args
+    if arg is Any or type(arg) is type:
+        return _with(TypeForm.TYPE_OF, arg)
+    if type(arg) is Union:  # type: ignore[comparison-overlap]
+        for member in arg.__args__:
+            if type(member) is not type:
+                return _unsupported(_TYPE_ARG_REASON)
+        return _with(TypeForm.TYPE_OF, arg)
+    return _unsupported(_TYPE_ARG_REASON)
+
+
+def _classify_parametrised_class(
+    origin: type, args: tuple[Any, ...], /
+) -> Classified:
+    """
+    The arm for a parametrised class the core knows nothing about — and, by that
+    very fact, the extension point.
+
+    A class that declares a ``__validate__`` classmethod, or that has a
+    registered validator, says how its arguments are checked. Absent either, the
+    arguments go unchecked and the class validates on its origin alone: a generic
+    class does not, in general, expose enough at runtime to determine them, so
+    that is the specified meaning rather than a shortfall. It is *not* an error
+    to parametrise a class we cannot introspect — so its arguments are not
+    children either, a child being a component that bears on the verdict.
+
+    The exception is a class this distribution ships a plugin for, whose
+    arguments *are* determinable. Leaving those unchecked would report success we
+    had not earned, so it is an error naming the import that would fix it.
+    """
+    check = getattr(origin, "__validate__", None)
+    if check is None:
+        check = registered_validator(origin)
+    if check is None:
+        if plugin_import(origin) is not None:
+            return _unsupported(unsupported_explanation(origin))
+        return _plain(TypeForm.GENERIC_CLASS)
+    # Only the arguments the plugin *declares* as components are children, and
+    # only they propagate totality. The core cannot tell which of a plugin's
+    # arguments it validates and which are specifications the plugin interprets:
+    # numpy.ndarray[shape, dtype] has one of each, and treating the dtype as a
+    # component would poison every array type, since numpy.dtype[numpy.uint8] is
+    # itself a parametrised numpy class with no validator of its own.
+    positions = registered_components(origin)
+    if positions is None:
+        return _plain(TypeForm.PLUGIN)
+    children = tuple(args[i] for i in positions if i < len(args))
+    return TypeForm.PLUGIN, children, None, None
 
 
 def _typed_dict_fields(t: Any, /) -> list[tuple[str, Any]]:
@@ -535,75 +583,6 @@ def _typed_dict_fields(t: Any, /) -> list[tuple[str, Any]]:
     for name, ann in t.__annotations__.items():
         fields.append((name, strip_qualifiers(resolve(ann, t))))
     return fields
-
-
-def _analyse_tuple(
-    node: TypeNode, t: Any, args: tuple[Any, ...], fresh: list[TypeNode], /
-) -> None:
-    node._form = TypeForm.TUPLE
-    if not args:
-        # Bare typing.Tuple means any tuple; tuple[()] means the empty tuple.
-        # Both record no arguments, so only the spelling tells them apart.
-        if t is typing.Tuple:
-            node._form = TypeForm.CLASS
-        return
-    if len(args) == 2 and args[1] is Ellipsis:
-        node._children = (_build(args[0], fresh),)
-        return
-    node._children = tuple(_build(arg, fresh) for arg in args)
-
-
-def _analyse_type_of(
-    node: TypeNode, t: Any, args: tuple[Any, ...], fresh: list[TypeNode], /
-) -> None:
-    node._form = TypeForm.TYPE_OF
-    if not args:
-        return
-    (arg,) = args
-    if arg is Any or type(arg) is type:
-        node._children = (_build(arg, fresh),)
-        return
-    if type(arg) is Union:  # type: ignore[comparison-overlap]
-        for member in arg.__args__:
-            if type(member) is not type:
-                _unsupported(node, _TYPE_ARG_REASON)
-                return
-        node._children = (_build(arg, fresh),)
-        return
-    _unsupported(node, _TYPE_ARG_REASON)
-
-
-def _analyse_parametrised_class(
-    node: TypeNode,
-    t: Any,
-    origin: type,
-    args: tuple[Any, ...],
-    fresh: list[TypeNode],
-    /,
-) -> None:
-    check = getattr(origin, "__validate__", None)
-    if check is None:
-        check = registered_validator(origin)
-    if check is None:
-        if plugin_import(origin) is not None:
-            _unsupported(node, unsupported_explanation(origin))
-            return
-        # The arguments go unchecked, which is the specified meaning of a
-        # generic class rather than a shortfall, so they are not children: a
-        # child is a component that bears on the verdict. They are still visible
-        # on the type itself.
-        node._form = TypeForm.GENERIC_CLASS
-        return
-    node._form = TypeForm.PLUGIN
-    # Only the arguments the plugin *declares* as components are children, and
-    # only they propagate totality. The core cannot tell which of a plugin's
-    # arguments it validates and which are specifications the plugin interprets:
-    # numpy.ndarray[shape, dtype] has one of each, and treating the dtype as a
-    # component would poison every array type, since numpy.dtype[numpy.uint8] is
-    # itself a parametrised numpy class with no validator of its own.
-    components = registered_components(origin)
-    if components is not None:
-        node._children = tuple(_build(c, fresh) for c in components(args))
 
 
 _INLINE_FORWARD_REF_REASON = (

@@ -4,18 +4,22 @@
 Asking about a type, rather than about a value: what it is, whether it can be
 validated against, and — when it cannot — precisely what stopped it.
 
-In v1 this was a side effect of a validation walk, obtained by passing an
-inspector *as the value* into ``validate`` and having every branch record itself
-instead of checking. One walk served two purposes, and every new type form had to
-be implemented three times in lockstep. Here the structure is a real artifact,
-built from the node model, which exists anyway.
+The structure is a real artifact, built from the node model, which exists anyway
+to serve the validators.
 """
+
+# In v1 this was a side effect of a validation walk: an inspector was passed *as
+# the value* into validate, and every branch carried an arm that recorded itself
+# instead of checking. One walk served two purposes, so every new type form had
+# to be implemented three times in lockstep, and forgetting one produced a silent
+# gap rather than an error. See DESIGN.md §3.5.
 
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
-from .nodes import _TIERS, TypeNode, node_for
+from . import _cache as cache
+from .nodes import TypeNode, node_for
 
 __all__ = (
     "can_validate",
@@ -36,8 +40,6 @@ def inspect_type(t: Any, /) -> TypeNode:
     this be validated"* is then always "no", but it should never be an opaque
     "no" — use :meth:`~typing_validation.nodes.TypeNode.unsupported_components`
     to name the culprits.
-
-    :param t: the type to inspect.
     """
     return node_for(t)
 
@@ -57,8 +59,6 @@ def can_validate(t: Any, /) -> bool:
     returns :obj:`True` while this returns :obj:`False`. That is deliberate:
     scanning the type on every call is exactly the overhead that mechanism exists
     to avoid. This is the total answer, and it is the one to branch on.
-
-    :param t: the type to ask about.
     """
     return node_for(t).supported
 
@@ -72,8 +72,7 @@ def clear_cache() -> None:
     would be a semantic operation and no user could be expected to reason about
     it.
     """
-    for tier in _TIERS:
-        tier.clear()
+    cache.clear()
 
 
 def forget_type(t: Any, /) -> bool:
@@ -82,17 +81,8 @@ def forget_type(t: Any, /) -> bool:
 
     Returns whether anything was dropped. Note that nodes for its *components*
     are untouched and may still be shared by other types.
-
-    :param t: the type to forget.
     """
-    dropped = False
-    for tier in _TIERS:
-        try:
-            if tier.pop(t, None) is not None:
-                dropped = True
-        except TypeError:
-            return False
-    return dropped
+    return cache.forget(t)
 
 
 @contextmanager
@@ -111,15 +101,29 @@ def scoped_cache() -> Iterator[None]:
     operation, with no per-entry bookkeeping::
 
         with scoped_cache():
-            validate(val, build_a_type())
+            for spec in incoming_specs:
+                t = build_a_type_from(spec)
+                if can_validate(t):
+                    report(inspect_type(t))
+
+    Note that :func:`~typing_validation.validation.validate` is **not** what this
+    is for: it analyses nothing and interns nothing, so it neither fills this tier
+    nor benefits from it. What fills the cache is asking *about* a type —
+    :func:`can_validate`, :func:`inspect_type`, and the explanation built when a
+    validation fails.
 
     Nodes created inside may reference nodes in enclosing tiers, which outlive
     them; nothing enclosing can reference inward, because while this tier is
     active it is where all new nodes go. So dropping it can never leave a
     dangling reference — and can never change an answer, only a cost.
     """
-    _TIERS.append({})
+    # TODO: revisit this example when the reusable validators land. They are the
+    # mechanism that makes scoping genuinely compelling — one cached closure per
+    # type, built from a type the caller synthesised — whereas today the only
+    # clients are the introspection functions, which makes the case for scoping
+    # real but thin.
+    cache.push_tier()
     try:
         yield
     finally:
-        _TIERS.pop()
+        cache.pop_tier()

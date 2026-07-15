@@ -9,12 +9,12 @@ and imports it under a name of its own — which works because v1 still runs on
 3.14, and because the two versions share no module state.
 """
 
+import importlib
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from types import ModuleType
-from typing import cast
 
 _V1_REF = "main"
 """Where v1 lives. The trunk still holds 1.2.11."""
@@ -45,8 +45,6 @@ def load_v1() -> ModuleType | None:
     (root / "typing_validation").rename(root / "typing_validation_v1")
     sys.path.insert(0, str(root))
     try:
-        import typing_validation_v1  # type: ignore[import-not-found]
-
-        return cast(ModuleType, typing_validation_v1)
+        return importlib.import_module("typing_validation_v1")
     except ImportError:
         return None

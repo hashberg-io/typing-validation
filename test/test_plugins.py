@@ -16,9 +16,11 @@ import pytest
 from typing_validation import (
     UnsupportedTypeError,
     ValidationError,
+    is_valid,
     register_validator,
     validate,
 )
+from typing_validation.plugins import unsupported_explanation
 from typing_validation.plugins import _PLUGINS, _REGISTRY
 
 
@@ -38,8 +40,6 @@ class Owned[T]:
 
     @classmethod
     def __validate__(cls, val: Any, args: Sequence[Any]) -> bool:
-        from typing_validation import is_valid
-
         return is_valid(val.item, args[0])
 
 
@@ -71,8 +71,6 @@ class TestDunderProtocol:
 class TestRegistry:
 
     def test_a_registered_class_has_its_arguments_checked(self) -> None:
-        from typing_validation import is_valid
-
         register_validator(
             Foreign, lambda val, args: is_valid(val.item, args[0])
         )
@@ -152,8 +150,6 @@ class TestMessages:
         assert "not enabled" in message
 
     def test_an_unclaimed_class_message_names_both_routes(self) -> None:
-        from typing_validation.plugins import unsupported_explanation
-
         message = unsupported_explanation(Unclaimed)
         assert "__validate__" in message
         assert "register_validator" in message

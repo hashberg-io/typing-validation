@@ -42,9 +42,9 @@ class UnsupportedTypeError(NotImplementedError):
 
     def __new__(cls, t: Any, explanation: str | None = None, /) -> Self:
         """
-        :param t: the whole type that cannot be validated against.
-        :param explanation: optional additional lines naming the component at
-            fault and, where possible, how to gain support for it.
+        ``t`` is the **whole** type, not the component at fault. The explanation
+        is where the component is named, along with whatever would gain support
+        for it.
         """
         self: Self = NotImplementedError.__new__(cls, t, explanation)
         self._t = t
@@ -73,17 +73,19 @@ class ValidationError(TypeError):
     """
     Raised when a value is not valid for a type.
 
-    This is a :class:`TypeError` subclass, which is the contract callers have
-    relied on since v1. It is a *distinct* subclass so that a test can assert
-    the library rejected a value, rather than merely that something somewhere
-    raised a :class:`TypeError` — a distinction that hid a real crash in v1 for
-    eleven releases.
+    This is a :class:`TypeError`, so ``except TypeError`` catches it. It is a
+    *distinct* subclass so that you can tell *"this library rejected the value"*
+    apart from *"something raised a TypeError"* — catch this rather than the base
+    class if you mean the former.
 
-    The structured explanation hangs off :attr:`~typing_validation.errors.ValidationError.failure`, as a proper attribute
-    rather than v1's ``setattr(error, "validation_failure", …)`` smuggling.
-    Programmatic access is then an attribute on an exception you have already
-    caught, which is what ``get_validation_failure`` existed to provide.
+    The structured explanation of what went wrong, and where, is on
+    :attr:`failure`.
     """
+
+    # The distinct subclass is not decoration. v1 raised a bare TypeError, so its
+    # own test sweep read a crash inside isinstance as a correct rejection, and
+    # the bug shipped for eleven releases. The exception hierarchy is what makes
+    # the test rule in DESIGN.md §10 enforceable.
 
     __slots__ = ("_val", "_t", "_failure")
 
@@ -100,9 +102,9 @@ class ValidationError(TypeError):
         cls, val: Any, t: Any, failure: "ValidationFailure | None" = None, /
     ) -> Self:
         """
-        :param val: the value that failed validation.
-        :param t: the type it was validated against.
-        :param failure: the structured explanation, if one was built.
+        The failure is optional because not every raiser builds one:
+        ``validated_iter`` reports the item it stopped at without diagnosing the
+        whole iterable.
         """
         self: Self = TypeError.__new__(cls, val, t, failure)
         self._val = val

@@ -12,21 +12,33 @@ to *"do they agree on the boolean"*, which is a far smaller thing to police than
 *"do they agree on the message"*.
 
 And because this runs only on a failure, which is by definition exceptional, it
-may be as slow, allocating and thorough as it likes. It is, in effect, v1's
-``validate`` — rich and allocating — demoted from the hot path to diagnostics
-duty, where its costs stop mattering and its quality is the entire point.
+may be as slow, allocating and thorough as it likes — where its costs stop
+mattering and its quality is the entire point.
 
 The second traversal is sound only because validation is pure: the value handed
 here is the value the validator saw, undisturbed.
 """
 
+# This is, in effect, v1's validate — rich and allocating — demoted from the hot
+# path to diagnostics duty.
+
 import enum
-import typing
 from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal, Union, final
-
+from typing import (
+    NewType,
+    TypeAliasType,
+    Any,
+    final,
+    get_args,
+    get_origin,
+    Literal,
+    NamedTuple,
+    Tuple,
+    Union,
+)
 from .nodes import TypeForm, TypeNode, node_for
+from .plugins import registered_validator
 
 __all__ = (
     "Detail",
@@ -155,7 +167,9 @@ class ValidationFailure:
     """Why it failed."""
 
     location: Location | None = None
-    """Where this sits within the value that contains it. :obj:`None` at the root."""
+    """
+    Where this sits within the value that contains it. :obj:`None` at the root.
+    """
 
     causes: tuple[ValidationFailure, ...] = ()
     """The failures inside this one."""
@@ -185,45 +199,150 @@ class ValidationFailure:
         )
 
     def __str__(self) -> str:
-        # STUB. The message format is deliberately unsettled and owed a round of
-        # its own, deferred until the rest of 2.0 is in place: it lives in
-        # exactly one place, so it is cheap to settle once and expensive to
-        # relitigate. This renders the tree faithfully enough to read while that
-        # decision is outstanding, and is not the format.
-        lines: list[str] = []
-        stack: list[tuple[ValidationFailure, int]] = [(self, 0)]
-        while stack:
-            failure, depth = stack.pop()
-            if depth > _STUB_MESSAGE_DEPTH:
-                lines.append("  " * depth + "...")
-                continue
-            lines.append(failure._line(depth))
-            stack.extend(
-                (cause, depth + 1) for cause in reversed(failure.causes)
-            )
+        """
+        The failure as a message: what was expected, where, and in what.
+
+        Three slots, of which the third is dropped when the first has already
+        filled it::
+
+            expected int, got str '1975'
+              at:  value.year
+              in:  Movie
+
+        The tree records everything; the message reports the one place worth
+        looking at. Which place that is takes some finding — see :func:`_locate`.
+        """
+        path, deepest = _locate(self)
+        lines = [_says(deepest), f"  at:  value{path}"]
+        # `in:` names the type the caller asked about. Line one has already
+        # named it whenever the failure is at the root and the detail says
+        # "expected <type>", so repeating it would add nothing. The details that
+        # never name a type are exactly the ones that still need it.
+        already_named = (
+            self.t is deepest.t and deepest.detail not in _NAMELESS_DETAILS
+        )
+        if not already_named:
+            lines.append(f"  in:  {_show(self.t)}")
         return "\n".join(lines)
 
-    def _line(self, depth: int) -> str:
-        pad = "  " * depth
-        where = ""
-        if self.location is not None:
-            where = f" {self.location.place.value}"
-            if self.location.at is not None:
-                where += f" {self.location.at!r}"
-        line = f"{pad}For type {self.t!r}{where}: {self.detail.value}"
-        if not self.causes:
-            line += f", got {self.val!r}"
-        return line
+
+# TODO: make the message's verbosity an option, once there is an option manager
+# to hang it on. The tree records every level and the message reports one place,
+# which is right by default and occasionally not: someone debugging a union that
+# should have matched wants to see what each member objected to, and someone
+# reading a deeply nested failure may want the containment chain rather than just
+# its endpoint. That is a switch, not a rewrite — the tree already holds all of
+# it, and this is the only place that decides what to show.
 
 
-_STUB_MESSAGE_DEPTH = 20
+_NAMELESS_DETAILS = (Detail.MISSING_KEY, Detail.NON_STRING_KEY)
 """
-How deep the stub renderer goes before eliding.
+The details whose message never names the type it is about.
 
-A failure twenty thousand levels down is a real failure and the tree records it
-in full; printing all of it would help nobody. Where the cut belongs, and whether
-it belongs at all, is part of the deferred message-format decision.
+Every other detail reads *"expected <type>"*, which is what makes ``in:``
+redundant for a failure at the root. These two do not, so they keep it.
 """
+
+
+def _show(t: Any, /) -> str:
+    """
+    A type as the user wrote it, rather than as Python reprs it.
+
+    ``int`` rather than ``<class 'int'>``, and ``UserId`` rather than
+    ``module.UserId``: the message is read by someone who has the type in front
+    of them, and its module is noise.
+    """
+    if t is None or t is type(None):
+        return "None"
+    if isinstance(t, type):
+        return t.__name__
+    name = getattr(t, "__name__", None)
+    if name is not None and type(t) in (TypeAliasType, NewType):
+        return str(name)
+    return str(t).replace("typing.", "")
+
+
+def _plural(n: int, noun: str, /) -> str:
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+def _says(f: ValidationFailure, /) -> str:
+    """What went wrong, in one line, at the place worth looking at."""
+    if f.detail is Detail.MISSING_KEY:
+        return f"missing required key {f.location.at!r}"  # type: ignore[union-attr]
+    if f.detail is Detail.NON_STRING_KEY:
+        return f"keys must be strings, got {type(f.val).__name__}"
+    if f.detail is Detail.WRONG_LENGTH:
+        return f"expected {_show(f.t)}, got {_plural(len(f.val), 'element')}"
+    if f.detail is Detail.NO_LITERAL:
+        # A literal's own type is the point, so naming the value's type as well
+        # would be saying the same thing twice. This is the one detail that does
+        # not end in a type-and-value pair, deliberately.
+        return f"expected {_show(f.t)}, got {f.val!r}"
+    if f.detail is Detail.NOT_A_CLASS:
+        return f"expected a class, got {type(f.val).__name__} {f.val!r}"
+    if f.detail is Detail.NOT_A_NAMED_TUPLE:
+        return f"expected a named tuple, got {type(f.val).__name__} {f.val!r}"
+    return f"expected {_show(f.t)}, got {type(f.val).__name__} {f.val!r}"
+
+
+def _step(f: ValidationFailure, /) -> str:
+    """How to reach this failure from the value that contains it, in code."""
+    if f.location is None:
+        return ""
+    place, at = f.location.place, f.location.at
+    if place is Place.INDEX:
+        return f"[{at}]"
+    if place is Place.POSITION:
+        # Braces rather than brackets, because iteration order is not stable
+        # across runs: this is a witness that something failed, not an address
+        # the reader can go to.
+        return f"{{{at}}}"
+    if place is Place.KEY:
+        return f".keys(){{{at!r}}}"
+    if place is Place.VALUE_AT:
+        return f"[{at!r}]"
+    if place is Place.FIELD:
+        return f".{at}"
+    return ""
+
+
+def _locate(root: ValidationFailure, /) -> tuple[str, ValidationFailure]:
+    """
+    The deepest place in the value the failure reaches, and what was expected
+    *there*.
+
+    Two rules, and the naive walk gets both wrong.
+
+    **Through a union, follow the member that got furthest.** A union fails only
+    when every member fails, so listing them all says nothing the union type has
+    not already said — and most of them fail on sight. Five of ``JSON``'s six
+    members reject a dict immediately; only ``dict[str, JSON]`` gets deep enough
+    to be worth reading, and it is the one that finds the offending float.
+
+    **Report the type recorded at the deepest step**, not whatever the walk
+    bottoms out in. An alias is not transparent, so at ``value['a'][1]['b']`` the
+    answer is *"expected JSON"* — not the six-member union that ``JSON`` happens
+    to expand to, which is longer and says less.
+    """
+    f, path, deepest = root, "", root
+    while True:
+        if f.detail is Detail.IN_COMPONENT and f.causes:
+            child = f.causes[0]
+            step = _step(child)
+            f = child
+            if step:
+                path += step
+                deepest = child
+        elif f.detail is Detail.NO_UNION_MEMBER and f.causes:
+            best = max(f.causes, key=lambda c: c.depth())
+            if best.depth() <= 1:
+                # Every member failed on sight, so there is nothing deeper to
+                # report and the union itself is the answer.
+                return path, deepest
+            f = best
+        else:
+            return path, deepest
 
 
 @final
@@ -242,8 +361,6 @@ def diagnose(val: Any, t: Any, /) -> ValidationFailure:
     """
     Explain why a value is not valid for a type.
 
-    :param val: the value that failed.
-    :param t: the type it failed against.
     :raises DiagnosisFailure: if the value turns out to be valid after all, which
         means a mechanism has drifted from the specification.
     """
@@ -365,42 +482,35 @@ def _expand(val: Any, t: Any, location: Location | None, /) -> _Frame:
     node = node_for(t)
     form = node.form
     children = node.children
-
     if form is TypeForm.ANY:
         return _ok(val, t, location)
-
     if form is TypeForm.NONE:
         if val is None:
             return _ok(val, t, location)
         return _bad(val, t, location, Detail.NOT_NONE)
-
     if form is TypeForm.CLASS or form is TypeForm.PROTOCOL:
         if isinstance(val, _isinstance_target(node)):
             return _ok(val, t, location)
         return _bad(val, t, location, Detail.NOT_AN_INSTANCE)
-
     if form in _WRAPPERS:
         frame = _ok(val, t, location)
         if children:
             frame.todo.append((val, children[0].t, Location(Place.WRAPPED)))
         return frame
-
     if form is TypeForm.UNION:
         frame = _ok(val, t, location)
         frame.is_union = True
         for i, child in enumerate(children):
             frame.todo.append((val, child.t, Location(Place.MEMBER, i)))
         return frame
-
     if form is TypeForm.LITERAL:
         val_t = type(val)
-        for literal in typing.get_args(t):
+        for literal in get_args(t):
             if literal is val or (type(literal) is val_t and literal == val):
                 return _ok(val, t, location)
         return _bad(val, t, location, Detail.NO_LITERAL)
-
     if form is TypeForm.COLLECTION:
-        origin = typing.get_origin(t)
+        origin = get_origin(t)
         if not isinstance(val, origin):
             return _bad(val, t, location, Detail.NOT_AN_INSTANCE)
         frame = _ok(val, t, location)
@@ -416,9 +526,8 @@ def _expand(val: Any, t: Any, location: Location | None, /) -> _Frame:
             for i, item in enumerate(val):
                 frame.todo.append((item, children[0].t, Location(place, i)))
         return frame
-
     if form is TypeForm.MAPPING:
-        origin = typing.get_origin(t)
+        origin = get_origin(t)
         if not isinstance(val, origin):
             return _bad(val, t, location, Detail.NOT_AN_INSTANCE)
         frame = _ok(val, t, location)
@@ -431,13 +540,10 @@ def _expand(val: Any, t: Any, location: Location | None, /) -> _Frame:
                     (item, children[1].t, Location(Place.VALUE_AT, key))
                 )
         return frame
-
     if form is TypeForm.TUPLE:
         return _expand_tuple(val, t, location, node)
-
     if form is TypeForm.TYPED_DICT:
         return _expand_typed_dict(val, t, location, node)
-
     if form is TypeForm.NAMED_TUPLE:
         if not isinstance(val, t):
             return _bad(val, t, location, Detail.NOT_AN_INSTANCE)
@@ -448,22 +554,18 @@ def _expand(val: Any, t: Any, location: Location | None, /) -> _Frame:
                 (getattr(val, name), child.t, Location(Place.FIELD, name))
             )
         return frame
-
     if form is TypeForm.ANY_NAMED_TUPLE:
         if isinstance(val, tuple) and hasattr(type(val), "_fields"):
             return _ok(val, t, location)
         return _bad(val, t, location, Detail.NOT_A_NAMED_TUPLE)
-
     if form is TypeForm.TYPE_OF:
         return _expand_type_of(val, t, location, node)
-
     if form is TypeForm.ITERATOR:
-        if isinstance(val, typing.get_origin(t)):
+        if isinstance(val, get_origin(t)):
             return _ok(val, t, location)
         return _bad(val, t, location, Detail.NOT_AN_INSTANCE)
-
     if form is TypeForm.MAYBE_ITEMS:
-        origin = typing.get_origin(t)
+        origin = get_origin(t)
         if not isinstance(val, origin):
             return _bad(val, t, location, Detail.NOT_AN_INSTANCE)
         frame = _ok(val, t, location)
@@ -473,15 +575,12 @@ def _expand(val: Any, t: Any, location: Location | None, /) -> _Frame:
                     (item, children[0].t, Location(Place.INDEX, i))
                 )
         return frame
-
     if form is TypeForm.GENERIC_CLASS:
-        if isinstance(val, typing.get_origin(t)):
+        if isinstance(val, get_origin(t)):
             return _ok(val, t, location)
         return _bad(val, t, location, Detail.NOT_AN_INSTANCE)
-
     if form is TypeForm.PLUGIN:
         return _expand_plugin(val, t, location, node)
-
     # An unsupported type is not a failure to explain: the value was never in
     # question, and something upstream should have raised long before here.
     return _ok(val, t, location)
@@ -505,7 +604,7 @@ says both — ``UserId``, and then the ``int`` it turned out not to be.
 
 def _isinstance_target(node: TypeNode, /) -> Any:
     t = node.t
-    origin = typing.get_origin(t)
+    origin = get_origin(t)
     return t if origin is None else origin
 
 
@@ -514,9 +613,9 @@ def _expand_tuple(
 ) -> _Frame:
     if not isinstance(val, tuple):
         return _bad(val, t, location, Detail.NOT_AN_INSTANCE)
-    args = typing.get_args(t)
+    args = get_args(t)
     if not args:
-        if t is typing.Tuple or not val:
+        if t is Tuple or not val:
             return _ok(val, t, location)
         return _bad(val, t, location, Detail.WRONG_LENGTH)
     frame = _ok(val, t, location)
@@ -563,7 +662,7 @@ def _expand_type_of(
 ) -> _Frame:
     if not isinstance(val, type):
         return _bad(val, t, location, Detail.NOT_A_CLASS)
-    args = typing.get_args(t)
+    args = get_args(t)
     if not args:
         return _ok(val, t, location)
     (arg,) = args
@@ -578,15 +677,13 @@ def _expand_type_of(
 def _expand_plugin(
     val: Any, t: Any, location: Location | None, node: TypeNode, /
 ) -> _Frame:
-    origin = typing.get_origin(t)
+    origin = get_origin(t)
     if not isinstance(val, origin):
         return _bad(val, t, location, Detail.NOT_AN_INSTANCE)
     check = getattr(origin, "__validate__", None)
     if check is None:
-        from .plugins import registered_validator
-
         check = registered_validator(origin)
-    if check is not None and check(val, typing.get_args(t)):
+    if check is not None and check(val, get_args(t)):
         return _ok(val, t, location)
     # A plugin's obligation is a boolean, so this is all there is to say unless
     # it chooses to say more. Diagnostics are an optional thing a plugin may

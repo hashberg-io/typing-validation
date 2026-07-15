@@ -17,18 +17,21 @@ NumPy and :obj:`False` in one where it did not. A predicate people branch on mus
 not behave that way, and the failure would be maddening to diagnose precisely
 because nothing in the user's own code would have changed.
 
-This is v1 functionality, moved out of the core. v1 wired an ``import numpy``
-probe into the middle of the dispatcher, putting an optional third-party
-dependency on the hot path of a library that has no dependencies. But the
-stronger reason to move it is that it **dogfoods the plugin API**: a plugin
-system whose author never uses it is always subtly wrong, and NumPy is a
-punishing first client.
 """
 
-import typing
-from collections.abc import Sequence
-from typing import Any, Union
+# This is v1 functionality, moved out of the core, where an `import numpy` probe
+# sat in the middle of the dispatcher — an optional third-party dependency on the
+# hot path of a library that has none. The stronger reason to move it is that it
+# dogfoods the plugin API: a plugin system whose author never uses it is always
+# subtly wrong, and NumPy is a punishing first client. See DESIGN.md §7.
 
+from collections.abc import Sequence
+from typing import (
+    Any,
+    get_args,
+    get_origin,
+    Union,
+)
 import numpy as np
 
 from .errors import UnsupportedTypeError
@@ -81,8 +84,8 @@ def _unpack(args: Sequence[Any], t: Any, /) -> tuple[Any, Any]:
             "NDArray[numpy.uint8].",
         )
     shape_t, dtype_container = args
-    dtype_args = typing.get_args(dtype_container)
-    if typing.get_origin(dtype_container) is not np.dtype or not dtype_args:
+    dtype_args = get_args(dtype_container)
+    if get_origin(dtype_container) is not np.dtype or not dtype_args:
         raise UnsupportedTypeError(
             t,
             f"Expected numpy.dtype[...] as the second argument, got "
@@ -112,16 +115,8 @@ def _check_ndarray(val: Any, args: Sequence[Any], /) -> bool:
     return is_valid(val.shape, shape_t)
 
 
-def _ndarray_components(args: Sequence[Any], /) -> Sequence[Any]:
-    """
-    The shape type, and only the shape type.
-
-    The dtype argument is a specification this plugin interprets, not a
-    validation target: ``numpy.dtype[numpy.uint8]`` is itself a parametrised
-    NumPy class with no validator, so calling it a component would poison every
-    array type through totality.
-    """
-    return args[:1]
-
-
-register_validator(np.ndarray, _check_ndarray, _ndarray_components)
+# The shape, and only the shape. The dtype argument is a specification this
+# plugin interprets rather than a validation target: numpy.dtype[numpy.uint8] is
+# itself a parametrised NumPy class with no validator, so calling it a component
+# would poison every array type through totality.
+register_validator(np.ndarray, _check_ndarray, (0,))

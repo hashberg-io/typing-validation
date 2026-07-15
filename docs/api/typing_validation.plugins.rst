@@ -3,6 +3,16 @@ typing_validation.plugins
 
 .. automodule:: typing_validation.plugins
 
+PluginCheck
+-----------
+
+.. autodata:: typing_validation.plugins.PluginCheck
+
+PluginComponents
+----------------
+
+.. autodata:: typing_validation.plugins.PluginComponents
+
 plugin_import
 -------------
 

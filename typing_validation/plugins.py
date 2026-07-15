@@ -17,6 +17,8 @@ anything for its existence.
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from . import _cache as cache
+
 __all__ = (
     "plugin_import",
     "register_validator",
@@ -25,7 +27,7 @@ __all__ = (
     "unsupported_explanation",
 )
 
-PluginCheck = Callable[[Any, Sequence[Any]], bool]
+type PluginCheck = Callable[[Any, Sequence[Any]], bool]
 """
 What a plugin must provide: given a value and the type arguments, say whether
 the value is valid. Nothing more is required.
@@ -35,18 +37,20 @@ absurd toll for supporting one type. A plugin may *optionally* supply more —
 structure, diagnostics, an emitter — but a boolean is the whole obligation.
 """
 
-PluginComponents = Callable[[Sequence[Any]], Sequence[Any]]
+type PluginComponents = Sequence[int]
 """
-Optional: given the type arguments, which of them the **core** validates.
+Optional: which of a parametrised class's type arguments the **core** validates,
+by position.
 
 Not every type argument is one, and ``numpy.ndarray[shape, dtype]`` has one of
 each. The shape is an ordinary type, which the core checks the array's
 ``.shape`` tuple against. ``numpy.dtype[numpy.uint8]`` is a *specification the
-plugin interprets*, and never a validation target in its own right.
+plugin interprets*, and never a validation target in its own right — so NumPy
+declares ``(0,)``.
 
 The core cannot tell them apart, and guessing wrong is not harmless. Treating
 every argument as a component makes ``numpy.dtype[numpy.uint8]`` one — and it is
-itself a parametrised numpy class with no validator of its own, so totality
+itself a parametrised NumPy class with no validator of its own, so totality
 poisons it, and with it every array type there is. Declaring components is what
 keeps totality propagating through the arguments that deserve it and out of the
 ones that do not.
@@ -64,7 +68,7 @@ available for ``numpy.ndarray``, which we cannot give a dunder to. Neither
 flavour subsumes the other.
 """
 
-_COMPONENTS: dict[type, PluginComponents] = {}
+_COMPONENTS: dict[type, tuple[int, ...]] = {}
 """Component declarations, for the plugins that supply one."""
 
 _PLUGINS = {"numpy": "typing_validation.numpy"}
@@ -105,29 +109,56 @@ def register_validator(
     Declare how the type arguments of a parametrised class are validated.
 
     This is the route for classes you do not own. For a class you do own, define
-    a ``__validate__`` classmethod instead — and, if you want components, a
-    ``__validate_components__`` classmethod. Both take the same arguments and
-    mean the same thing.
+    a ``__validate__`` classmethod instead, and a ``__validate_components__``
+    class attribute if you want components::
 
-    :param cls: the class, unparametrised — ``numpy.ndarray``, not
-        ``numpy.ndarray[shape, dtype]``.
-    :param check: given a value and the type arguments, whether the value is
-        valid.
-    :param components: optionally, which of the type arguments the core
-        validates, so that totality propagates through them. See
-        :data:`~typing_validation.plugins.PluginComponents`.
-    :raises TypeError: if ``cls`` is not a class, or either callable is not.
+        class Box[T]:
+            __validate_components__ = (0,)
+
+            @classmethod
+            def __validate__(cls, val, args):
+                return is_valid(val.item, args[0])
+
+    ``cls`` is the class unparametrised — ``numpy.ndarray``, not
+    ``numpy.ndarray[shape, dtype]``. ``components`` says which type arguments
+    the core validates, **by position**, so that totality propagates through
+    them; see :data:`~typing_validation.plugins.PluginComponents` for why the
+    core cannot work that out for itself.
+
+    :raises TypeError: if ``cls`` is not a class, ``check`` is not callable, or
+        ``components`` is not a sequence of positions.
     """
     if not isinstance(cls, type):
         raise TypeError(f"Expected a class, got {cls!r}.")
     if not callable(check):
         raise TypeError(f"Expected a callable, got {check!r}.")
-    if components is not None and not callable(components):
-        raise TypeError(f"Expected a callable, got {components!r}.")
     _REGISTRY[cls] = check
     if components is not None:
-        _COMPONENTS[cls] = components
+        _COMPONENTS[cls] = _positions(components)
     _invalidate_nodes()
+
+
+def _positions(components: PluginComponents, /) -> tuple[int, ...]:
+    """
+    Component positions, checked.
+
+    Positions rather than a function that picks the types out, because every
+    real case *is* a selection — NumPy's whole declaration is "the first one" —
+    and a function could return types that appear nowhere in the type it
+    describes, which would make ``inspect_type`` report children the type does
+    not have.
+    """
+    try:
+        positions = tuple(int(i) for i in components)
+    except TypeError as exc:
+        raise TypeError(
+            f"Expected a sequence of argument positions, got {components!r}."
+        ) from exc
+    if any(i < 0 for i in positions):
+        raise TypeError(
+            f"Argument positions must not be negative: {positions}."
+        )
+    return positions
 
 
 def _invalidate_nodes() -> None:
@@ -146,36 +177,27 @@ def _invalidate_nodes() -> None:
     at import time and approximately never after, so the cost is nil, and
     working out precisely which nodes a new validator affects means walking the
     whole graph anyway.
-
-    The import is local because the node model depends on this module, and the
-    dependency may not run the other way at module level.
     """
-    from .nodes import _TIERS
-
-    for tier in _TIERS:
-        tier.clear()
+    cache.clear()
 
 
 def registered_validator(cls: type, /) -> PluginCheck | None:
     """
     The validator registered for a class, or :obj:`None` if there is none.
-
-    :param cls: the unparametrised class.
     """
     return _REGISTRY.get(cls)
 
 
-def registered_components(cls: type, /) -> PluginComponents | None:
+def registered_components(cls: type, /) -> tuple[int, ...] | None:
     """
-    The component declaration for a class, or :obj:`None` if it made none.
-
-    :param cls: the unparametrised class.
+    Which of a class's type arguments the core validates, by position, or
+    :obj:`None` if it declared none.
     """
     declared = _COMPONENTS.get(cls)
     if declared is not None:
         return declared
     own = getattr(cls, "__validate_components__", None)
-    return own if callable(own) else None
+    return None if own is None else _positions(own)
 
 
 def plugin_import(origin: Any, /) -> str | None:
@@ -187,8 +209,6 @@ def plugin_import(origin: Any, /) -> str | None:
     leaving them unchecked would report success we had not earned. Answering
     non-:obj:`None` here is therefore what turns an unregistered parametrised
     class from *"arguments unchecked, by design"* into an error.
-
-    :param origin: the unparametrised class.
     """
     module = getattr(origin, "__module__", "")
     return _PLUGINS.get(module.split(".")[0])
@@ -197,12 +217,9 @@ def plugin_import(origin: Any, /) -> str | None:
 def unsupported_explanation(origin: Any, /) -> str:
     """
     Why a parametrised class could not be validated, and what would fix it.
-
-    Every unsupported-generic error should teach, which v1's flat *"Unsupported
-    validation for type X"* never did.
-
-    :param origin: the unparametrised class that has no validator.
     """
+    # Every unsupported-generic error should teach: v1's flat "Unsupported
+    # validation for type X" left the reader with nowhere to go.
     module = getattr(origin, "__module__", "")
     qualname = getattr(origin, "__qualname__", repr(origin))
     name = f"{module}.{qualname}" if module else qualname

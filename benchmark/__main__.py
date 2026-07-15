@@ -34,16 +34,15 @@ def _time(fn: Callable[[], Any], repeats: int, /) -> float:
     return best / repeats * 1e9
 
 
-def _guard(fn: Callable[[], Any]) -> Callable[[], Any]:
-    """Swallow the failure, so the failure path measures work and not a traceback."""
-
-    def run() -> Any:
-        try:
-            return fn()
-        except Exception:
-            return None
-
-    return run
+def _swallow(fn: Callable[[], Any], /) -> None:
+    """
+    Run something and discard its failure, so the failure path measures the work
+    rather than the traceback.
+    """
+    try:
+        fn()
+    except Exception:
+        pass
 
 
 def _row(name: str, value: float | None, per_node: float | None = None) -> str:
@@ -67,7 +66,6 @@ def main() -> None:
         "--filter", default="", help="only run cases whose name contains this"
     )
     args = parser.parse_args()
-
     env = environment()
     print("Environment")
     print(describe(env))
@@ -76,33 +74,29 @@ def main() -> None:
     print(
         "\nns/call is what a user experiences; ns/node compares across shapes."
     )
-
     regressions: list[str] = []
     selected = [c for c in cases() if args.filter in c.name]
     for case in selected:
         print(f"\n  {case.name}  ({case.nodes} nodes)")
         n = case.repeats if hasattr(case, "repeats") else args.repeats
         n = max(50, n // max(1, case.nodes // 50))
-
         ours = _time(lambda: validate(case.valid, case.t), n)
         print(_row("validate (valid)", ours, ours / case.nodes))
-
-        ours_bad = _time(_guard(lambda: validate(case.invalid, case.t)), n)
+        ours_bad = _time(
+            lambda: _swallow(lambda: validate(case.invalid, case.t)), n
+        )
         # The failure path pays for a second traversal, on the assumption that
         # failures are exceptional so paying twice is free. An assumption in a
         # performance argument is exactly what a benchmark is for.
         print(_row("validate (invalid, + diagnose)", ours_bad))
-
         is_valid_bad = _time(lambda: is_valid(case.invalid, case.t), n)
         print(_row("is_valid (invalid, no diagnose)", is_valid_bad))
-
         if case.baseline is not None:
             hand = _time(lambda: case.baseline(case.valid), n)  # type: ignore[misc]
             print(_row("hand-written", hand, hand / case.nodes))
             print(
                 f"    {'-> validate is':34} {ours / hand:>9.1f}x hand-written"
             )
-
         if v1 is not None and case.v1_comparable:
             try:
                 v1.validate(case.valid, case.t)
@@ -117,7 +111,6 @@ def main() -> None:
                 verdict += "  <-- SLOWER THAN v1"
                 regressions.append(case.name)
             print(f"    {'-> validate is':34} {verdict:>9}")
-
     print("\n" + "=" * 66)
     if regressions:
         # The number that matters most. validate is the function everybody calls
