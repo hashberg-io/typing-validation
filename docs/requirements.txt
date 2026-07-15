@@ -1,3 +1,7 @@
 sphinx_rtd_theme
 sphinx_autodoc_typehints
 typing_extensions
+
+# include all package dependencies here
+# (typing-validation itself has no runtime dependencies, and is imported from
+#  the repo via the sys.path entry set in conf.py rather than installed)

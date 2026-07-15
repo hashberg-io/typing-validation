@@ -1,28 +1,74 @@
-r"""
-    Autodoc extension dealing with local type references and function signatures.
-"""
+"""Autodoc extension to document attributes and signatures based on Python type hints."""
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Lesser General Public License for more details.
+
+# You should have received a copy of the GNU Lesser General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+import annotationlib
+from collections import deque
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
+import functools
 import inspect
 import re
+import traceback
 from types import FunctionType, ModuleType
-from typing import Any, Optional, Union
-from typing_extensions import Literal
+from typing import Any
 from sphinx.application import Sphinx
+from sphinx.util import logging
+
+logger = logging.getLogger(__name__)
+
+# In conf.py, can use property_descriptors and/or cached_property_descriptors
+# to specify descriptor classes which should be documented as (cached) properties.
+# For example, the following is in conf.py for the tensorsat project:
+# cached_property_descriptors = {"tensorsat._utils.meta.cached_property"}
+
+PROPERTY_DESCRIPTORS: set[str] = set()
+CACHED_PROPERTY_DESCRIPTORS: set[str] = set()
+
+
+### 1. Parse Type Annotations ###
+
 
 @dataclass(frozen=True)
 class ParsedType:
-    r""" Dataclass for a parsed type. """
+    r"""Dataclass for a parsed type."""
+
     name: str
-    args: Union[None, str, tuple[ParsedType, ...]] = None
+    args: None | str | tuple[ParsedType, ...] = None
     variadic: bool = False
 
-    def crossref(self, globalns: Optional[Mapping[str, Any]] = None) -> str:
-        r""" Generates Sphinx cross-reference link for the given type, using local names. """
-        # pylint: disable = eval-used
+    def __post_init__(self) -> None:
+        name, args, variadic = self.name, self.args, self.variadic
+        assert isinstance(name, str)
+        assert isinstance(variadic, bool)
+        if args is not None and not isinstance(args, str):
+            assert isinstance(args, tuple)
+            assert all(isinstance(arg, ParsedType) for arg in args)
+        if variadic:
+            assert isinstance(args, tuple)
+        if "(" in name or ")" in name:
+            raise ValueError(
+                "Round brackets in type annotations are only supported for "
+                "empty type arguments lists, in the form TypeName[()]."
+            )
+        if isinstance(args, str) and not args:
+            raise ValueError("Literal type must include at least one value.")
+
+    def crossref(self, globalns: Mapping[str, Any] | None = None) -> str:
+        """Generates Sphinx cross-reference link for the given type, using local names."""
         if globalns is None:
             globalns = {}
         name, args, variadic = self.name, self.args, self.variadic
@@ -34,138 +80,275 @@ class ParsedType:
             elif isinstance(obj, property):
                 role = "attr"
             elif isinstance(obj, type):
-                role = "class"
+                if name not in ("Any", "typing.Any"):
+                    role = "class"
             elif isinstance(obj, FunctionType):
                 role = "func"
         name_crossref = f":{role}:`{name}`"
         if args is None:
             return name_crossref
+        if name in ("UnionType", "types.UnionType"):
+            assert isinstance(args, tuple)
+            return " | ".join((arg.crossref(globalns) for arg in args))
         if isinstance(args, str):
             _args = eval(f"({args}, )")
             arg_crossrefs = ", ".join(f"``{repr(arg)}``" for arg in _args)
+        elif not args:
+            arg_crossrefs = "()"
         else:
             arg_crossrefs = ", ".join((arg.crossref(globalns) for arg in args))
         if variadic:
             arg_crossrefs += ", ..."
-        return fr"{name_crossref}\ [{arg_crossrefs}]"
+        return rf"{name_crossref}\ [{arg_crossrefs}]"
 
-def _find_closing_idx(s: str, c_open: str, c_close: str, idx_open: int = 0) -> int:
-    r""" Finds the index where a bracketed/quoted range ends. """
-    assert len(c_open) == 1, c_open
-    assert len(c_close) == 1, c_close
-    assert idx_open < len(s), (idx_open, len(s))
-    assert s[idx_open] == c_open, (idx_open, s[idx_open])
-    lvl = 1
-    idx_close: Optional[int] = None
-    for idx in range(idx_open+1, len(s)):
-        if s[idx] == c_close:
-            lvl -= 1
-        elif s[idx] == c_open:
-            lvl += 1
-        if lvl == 0:
-            idx_close = idx
-            break
-    if idx_close is None:
-        error_msg = f"Unbalanced opening symbol found while searching for first outermost {c_open}...{c_close} in {repr(s)}."
-        raise ValueError(error_msg)
-    return idx_close
-
-def _parse_type(annotation: str) -> tuple[Union[ParsedType, Literal["..."]], str]:
-    r"""
-        Parses an annotation into the first type appearing in it, together with the unparsed remainder of the annotation.
-    """
-    quote_close_idx = None
-    if annotation.startswith("'"):
-        quote_close_idx = _find_closing_idx(annotation, "'", "'", 0)
-    elif annotation.startswith('"'):
-        quote_close_idx = _find_closing_idx(annotation, '"', '"', 0)
-    if quote_close_idx is not None:
-        if quote_close_idx == 1:
-            raise ValueError(f"Cannot parse empty forward reference at start of annotation: annotation = {annotation}")
-        annotation = annotation[1:quote_close_idx]+annotation[quote_close_idx+1:]
-    try:
-        b_open: Optional[int] = annotation.index("[")
-    except ValueError:
-        b_open = None
-    try:
-        c_idx = annotation.index(",")
-    except ValueError:
-        c_idx = None
-    if b_open is not None and (c_idx is None or b_open < c_idx):
-        b_close = _find_closing_idx(annotation, "[", "]", b_open)
-        name = annotation[:b_open]
-        args_str = annotation[b_open+1:b_close]
-        res = annotation[b_close+1:]
-        assert name, (name, args_str, res)
-        # FIXME: this doesn't work with Callable[[...], ...]
-        if name.split(".")[-1] == "Literal":
-            return ParsedType(name, args_str), res
-        args: list[ParsedType] = []
-        variadic = False
-        while args_str:
-            arg, _args_str = _parse_type(args_str)
-            if isinstance(arg, ParsedType):
-                args.append(arg)
+    def _repr(self, level: int = 0) -> list[str]:
+        basic_indent = "  "
+        indent = basic_indent * level
+        next_indent = basic_indent * (level + 1)
+        name, args, variadic = self.name, self.args, self.variadic
+        if args is None:
+            assert not variadic
+            return [indent + f"ParsedType({name!r})"]
+        lines = [indent + "ParsedType(", next_indent + f"name = {self.name!r},"]
+        if isinstance(args, str):
+            assert not variadic
+            lines.append(next_indent + f"args = {args!r}")
+        else:
+            assert isinstance(args, tuple)
+            if not args:
+                assert not variadic
+                lines.append(next_indent + "args = ()")
             else:
-                assert arg == "...", arg
-                variadic = True
-                if _args_str:
-                    raise ValueError(f"Ellipsis argument encountered in parametric type, but not at the end of args lis: annotation = {annotation}, args_str = {args_str}")
-            if not _args_str:
-                break
-            if not _args_str.startswith(", "):
-                raise ValueError(f"Multiple type parameters must be separated by ', ': annotation = {annotation}, args_str = {args_str}, arg = {arg} _args_str = {_args_str}")
-            args_str = _args_str[2:]
-        return ParsedType(name, tuple(args), variadic), res
-    if c_idx is not None:
-        name = annotation[:c_idx]
-        res = annotation[c_idx:]
-        if name == "...":
-            raise ValueError(f"Found ellipsis followed by comma: annotation = {annotation}")
-        return ParsedType(name), res
-    if "]" in annotation:
-        raise ValueError(f"Encountered closing bracket ']' without any opening bracket: annotation = {annotation} ")
-    name = annotation
-    if name == "...":
-        return "...", ""
-    return ParsedType(name), ""
+                lines.append(next_indent + "args = (")
+                for i, arg in enumerate(args):
+                    assert isinstance(arg, ParsedType)
+                    lines.extend(arg._repr(level + 2))
+                    sep = "," if i < len(args) - 1 or len(args) == 1 else ""
+                    lines[-1] = lines[-1] + sep
+                lines.append(next_indent + ")")
+        if variadic:
+            lines[-1] = lines[-1] + ","
+            lines.append(next_indent + "variadic = True")
+        lines.append(indent + ")")
+        return lines
+
+    def __repr__(self) -> str:
+        """Return a structured representation of the parsed type."""
+        return "\n".join(self._repr())
+
+
+def _outer_bracket_ranges(s: str, start: int, stop: int) -> Iterator[range]:
+    if stop is None:
+        stop = len(s)
+    open: int | None = None
+    level = 0
+    for i in range(start, stop):
+        c = s[i]
+        if c == "[":
+            if open is None:
+                assert level == 0
+                open = i
+            level += 1
+        if c == "]":
+            if open is None:
+                raise ValueError(f"Unbalanced ']' at index {i}.")
+            assert level > 0
+            level -= 1
+            if level == 0:
+                yield range(open, i + 1)
+                open = None
+    if open is not None:
+        raise ValueError(f"Unbalanced '[' at index {open}.")
+
+
+def _find_outside_ranges(
+    char: str, s: str, ranges: Iterable[range], start: int, stop: int
+) -> Iterator[int]:
+    assert len(char) == 1, f"Expected single char, found {s!r}."
+    if stop is None:
+        stop = len(s)
+    ranges = deque(sorted(ranges, key=lambda r: r.start))
+    _start = start
+    while (char_idx := s.find(char, _start, stop)) >= 0:
+        while ranges and ranges[0].stop <= _start:
+            ranges.popleft()
+        if not ranges or char_idx not in ranges[0]:
+            yield char_idx
+            _start = char_idx + 1
+        else:
+            r = ranges.popleft()
+            _start = r.stop
+
+
+def _split_at(idxs: Iterable[int], start: int, stop: int) -> Iterable[range]:
+    idxs = sorted(idxs)
+    assert all(idx in range(start, stop) for idx in idxs)
+    _start = start
+    for idx in idxs:
+        if idx > _start:
+            yield range(_start, idx)
+        else:
+            assert idx == _start
+        _start = idx + 1
+    if _start < stop:
+        yield range(_start, stop)
+
+
+def _parsed_type(
+    annotation: str,
+    start: int,
+    stop: int,
+    name: str,
+    args: None | str | tuple[ParsedType, ...] = None,
+    variadic: bool = False,
+) -> ParsedType:
+    try:
+        t = ParsedType(name, args, variadic)
+    except ValueError as e:
+        raise ValueError(
+            "Error parsing type at \n"
+            f"{start = }, {stop = }, {annotation[start:stop] = }, {annotation = }.\n"
+            f"ValueError: {e}"
+        )
+    return t
+
+
+def _parse_type_args(
+    annotation: str, start: int, stop: int
+) -> tuple[tuple[ParsedType, ...], bool]:
+    if annotation[start:stop].strip() == "()":
+        return (), False
+    bracket_ranges = tuple(_outer_bracket_ranges(annotation, start, stop))
+    comma_idxs = tuple(
+        _find_outside_ranges(",", annotation, bracket_ranges, start, stop)
+    )
+    if not comma_idxs:
+        return (_parse_type(annotation, start, stop),), False
+    arg_ranges = tuple(_split_at(comma_idxs, start, stop))
+    args: list[ParsedType] = []
+    variadic = False
+    for i, r in enumerate(arg_ranges):
+        arg = _parse_type(annotation, r.start, r.stop)
+        if arg.name == "...":
+            if i < len(arg_ranges) - 1:
+                raise ValueError(
+                    "Ellipsis found in args, but not in last position, at "
+                    f"{start = }, {stop = }, {annotation[start:stop] = }, {annotation = }"
+                )
+            variadic = True
+            break
+        args.append(arg)
+    return tuple(args), variadic
+
+
+def _parse_atom_type(annotation: str, start: int, stop: int) -> ParsedType:
+    while start < stop and annotation[start].isspace():
+        start += 1
+    while start < stop and annotation[stop - 1].isspace():
+        stop -= 1
+    assert annotation[start:stop] == annotation[start:stop].strip()
+    bracket_ranges = tuple(_outer_bracket_ranges(annotation, start, stop))
+    if len(bracket_ranges) > 1:
+        raise ValueError(
+            "Non-union type must take the form 'TypeName' or 'TypeName[Args]'. "
+            f"Found multiple outer bracket pairs at "
+            f"{start = }, {stop = }, {annotation[start:stop] = }, {annotation = }"
+        )
+    r = bracket_ranges[0] if bracket_ranges else None
+    if r is None:
+        name = annotation[start:stop].strip()
+        return _parsed_type(annotation, start, stop, name)
+    elif r.stop < stop:
+        raise ValueError(
+            "Non-union type must take the form 'TypeName' or 'TypeName[Args]'. "
+            "Found text after bracket pair at "
+            f"{start = }, {stop = }, {annotation[start:stop] = }, {annotation = }"
+        )
+    name = annotation[start : r.start].strip()
+    if name in ("Literal", "typing.Literal"):
+        return _parsed_type(
+            annotation, start, stop, name, annotation[r.start + 1 : r.stop - 1]
+        )
+    if not name:
+        raise ValueError(
+            f"Found empty type name at "
+            f"{start = }, {stop = }, {annotation[start:stop] = }, {annotation = }"
+        )
+    args, variadic = _parse_type_args(annotation, r.start + 1, r.stop - 1)
+    return _parsed_type(annotation, start, stop, name, args, variadic)
+
+
+def _parse_type(annotation: str, start: int, stop: int) -> ParsedType:
+    bracket_ranges = tuple(_outer_bracket_ranges(annotation, start, stop))
+    ors_idxs = tuple(_find_outside_ranges("|", annotation, bracket_ranges, start, stop))
+    if not ors_idxs:
+        return _parse_atom_type(annotation, start, stop)
+    member_ranges = tuple(_split_at(ors_idxs, start, stop))
+    name = "UnionType"
+    args = tuple(_parse_atom_type(annotation, r.start, r.stop) for r in member_ranges)
+    return _parsed_type(annotation, start, stop, name, args)
+
 
 def parse_type(annotation: str) -> ParsedType:
-    r""" Parses an annotation into a type. """
-    # Handle top-level unions:
-    # FIXME: this doesn't handle nested unions.
-    if "|" in annotation:
-        member_types = [
-            parse_type(member_annotation.strip())
-            for member_annotation in annotation.split("|")
-        ]
-        return ParsedType("typing.Union", tuple(member_types))
-    parsed_type, residual_string = _parse_type(annotation)
-    if residual_string:
-        raise ValueError(f"Annotation was not entirely consumed by parsing: annotation = {annotation!r}, parsed_type = {parsed_type}, residual_string = {residual_string!r}")
-    if not isinstance(parsed_type, ParsedType):
-        raise ValueError(f"Cannot parse ellipsis on its own: annotation = {annotation}")
-    return parsed_type
+    return _parse_type(annotation, 0, len(annotation))
 
-def sigdoc(fun: FunctionType, lines: list[str]) -> None:
-    r"""
-        Returns doclines documenting the parameter and return type of the given function
+
+### 2. Track Classes Known to Autodoc ###
+
+_class_dict: dict[str, type] = {}
+
+
+def class_tracking_handler(
+    app: Sphinx,
+    what: str,
+    fullname: str,
+    obj: Any,
+    options: Any,
+    lines: list[str],
+) -> None:
     """
-    # pylint: disable = too-many-branches
+    Keeps track of classes known to autodoc, for use in other handlers.
+
+    Handler for Sphinx Autodoc's event
+    `autodoc-process-docstring <https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html#event-autodoc-process-docstring>`_
+    """
+    if what != "class":
+        return
+    _class_dict[fullname] = obj
+    if fullname in PROPERTY_DESCRIPTORS:
+        obj.__bases__ += (property,)
+    elif fullname in CACHED_PROPERTY_DESCRIPTORS:
+        obj.__bases__ += (functools.cached_property,)
+
+
+### 3. Document Function Parameter and Return Types ###
+
+
+def _sigdoc(fun: FunctionType, lines: list[str]) -> None:
+    """Return doclines documenting parameter/return types for the given function."""
     doc = "\n".join(lines)
     lines.append("")
     # FIXME: if an :rtype: line already exists, remove it here and re-append it after all param type lines.
     globalns = fun.__globals__
-    sig = inspect.signature(fun)
+    sig = inspect.signature(fun, annotation_format=annotationlib.Format.STRING)
     for p in sig.parameters.values():
         annotation = p.annotation
         if annotation == p.empty:
             continue
         if not isinstance(annotation, str):
-            print(f"WARNING! Found non-string annotation: {repr(annotation)}. Did you forget to import annotation from __future__?.")
+            # STRING-format signatures yield string annotations; coerce anything
+            # unexpected rather than failing.
+            logger.warning(f"Found non-string annotation: {annotation!r}.")
             annotation = str(annotation)
-        t = parse_type(annotation)
-        tx = t.crossref(globalns)
+        try:
+            t = parse_type(annotation)
+            tx = t.crossref(globalns)
+        except Exception as e:
+            logger.error(
+                f"Parsing param {p.name!r} type annotation {annotation!r},"
+                f" {type(e)}: {e}"
+            )
+            tx = annotation
         default = p.default if p.default != p.empty else None
         is_args = p.kind == p.VAR_POSITIONAL
         is_kwargs = p.kind == p.VAR_KEYWORD
@@ -174,7 +357,11 @@ def sigdoc(fun: FunctionType, lines: list[str]) -> None:
         elif is_kwargs:
             extra_info = "variadic keyword"
         elif default is not None:
-            default_str = default.__qualname__ if isinstance(default, FunctionType) else repr(default)
+            default_str = (
+                default.__qualname__
+                if isinstance(default, FunctionType)
+                else repr(default)
+            )
             extra_info = f"default = ``{default_str}``"
         else:
             extra_info = None
@@ -188,53 +375,131 @@ def sigdoc(fun: FunctionType, lines: list[str]) -> None:
             lines.append(line)
     if sig.return_annotation == sig.empty:
         return
-    t = parse_type(sig.return_annotation)
-    tx = t.crossref(globalns)
+
+    try:
+        t = parse_type(sig.return_annotation)
+        tx = t.crossref(globalns)
+    except Exception as e:
+        logger.error(
+            f"Parsing return type annotation {annotation!r}," f" {type(e)}: {e}"
+        )
+        tx = annotation
     line = f":rtype: {tx}"
     if ":rtype:" not in doc:
         lines.append(line)
 
-def sigdoc_handler(app: Sphinx, what: str, fullname: str, obj: Any, options: Any, lines: list[str]) -> None:
-    r"""
-        Handler for Sphinx Autodoc's event
-        `autodoc-process-docstring<https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html#event-autodoc-process-docstring>`_
-        which replaces cross-references specified in terms of module globals with their fully qualified version.
+
+def signature_doc_handler(
+    app: Sphinx,
+    what: str,
+    fullname: str,
+    obj: Any,
+    options: Any,
+    lines: list[str],
+) -> None:
     """
-    # pylint: disable = too-many-arguments
+    Automatically documents parameter/return types for functions, methods and properties.
+
+    Handler for Sphinx Autodoc's event
+    `autodoc-process-docstring <https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html#event-autodoc-process-docstring>`_
+    """
     if what not in ("function", "method", "property"):
         return
     if what == "property":
         fun: FunctionType = obj.fget
     else:
         fun = obj
-    sigdoc(fun, lines)
+    try:
+        _sigdoc(fun, lines)
+    except Exception as e:
+        msg = (
+            f"In signature_doc_handler(app, {what = }, {fullname = }, ...),"
+            f" raised {type(e)}: {e}"
+        )
+        logger.error(msg)
+
+
+### 4. Document Attribute Types ###
+
+
+def attr_doc_handler(
+    app: Sphinx,
+    what: str,
+    fullname: str,
+    obj: Any,
+    options: Any,
+    lines: list[str],
+) -> None:
+    r"""
+    Automatically documents the type of attributes.
+
+    Handler for Sphinx Autodoc's event
+    `autodoc-process-docstring <https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html#event-autodoc-process-docstring>`_
+    """
+    if what != "attribute":
+        return
+    try:
+        attrname = fullname.split(".")[-1]
+        classname = ".".join(fullname.split(".")[:-1])
+        parent_class = _class_dict.get(classname)
+        if parent_class is not None:
+            annotations = annotationlib.get_annotations(
+                parent_class, format=annotationlib.Format.STRING
+            )
+            if attrname in annotations:
+                type_annotation = annotations[attrname]
+            else:
+                type_annotation = None
+            if type_annotation is not None:
+                if not isinstance(type_annotation, str):
+                    # STRING-format annotations are strings; coerce anything
+                    # unexpected rather than failing.
+                    logger.warning(f"Found non-string annotation: {type_annotation!r}.")
+                    type_annotation = str(type_annotation)
+                t = parse_type(type_annotation)
+                tx = t.crossref()
+                if ":rtype:" not in "\n".join(lines):
+                    lines.append(f":rtype: {tx}")
+    except Exception as e:
+        tb_str = "\n".join(traceback.format_tb(e.__traceback__))
+        msg = (
+            f"In attr_doc_handler(app, {what = }, {fullname = }, ...),"
+            f" raised {type(e)}: {e}\n{tb_str}"
+        )
+        logger.error(msg)
+
+
+### 5. Replace Cross-references with Fully Qualified Names ###
+
 
 def simple_crossref_pattern(name: str) -> re.Pattern[str]:
-    r"""
-        Pattern for simple imports:
+    """
+    Pattern for simple imports:
 
-        .. code-block :: python
+    .. code-block :: python
 
-            f":{role}:`{name}`"        # e.g. ":class:`MyClass`"
-            f":{role}:`~{name}`"       # e.g. ":class:`~MyClass`"
-            f":{role}:`{name}{tail}`"  # e.g. ":attr:`MyClass.my_property.my_subproperty`"
-            f":{role}:`~{name}{tail}`" # e.g. ":attr:`~MyClass.my_property.my_subproperty`"
+        f":{role}:`{name}`"        # e.g. ":class:`MyClass`"
+        f":{role}:`~{name}`"       # e.g. ":class:`~MyClass`"
+        f":{role}:`{name}{tail}`"  # e.g. ":attr:`MyClass.my_property.my_subproperty`"
+        f":{role}:`~{name}{tail}`" # e.g. ":attr:`~MyClass.my_property.my_subproperty`"
 
     """
     return re.compile(rf":([a-z]+):`(~)?{name}(\.[\.a-zA-Z0-9_]+)?`")
 
+
 def simple_crossref_repl(name: str, fullname: str) -> Callable[[re.Match[str]], str]:
-    r"""
-        Replacement function for the pattern generated by :func:`simple_crossref_pattern`:
+    """
+    Replacement function for the pattern generated by :func:`simple_crossref_pattern`:
 
-        .. code-block :: python
+    .. code-block :: python
 
-            f":{role}:`~{fullname}`"                    # e.g. ":class:`~mymod.mysubmod.MyClass`"
-            f":{role}:`~{fullname}`"                    # e.g. ":class:`~mymod.mysubmod.MyClass`"
-            f":{role}:`{name}{tail}<{fullname}{tail}>`" # e.g. ":attr:`MyClass.my_property.my_subproperty<mymod.mysubmod.MyClass.my_property.my_subproperty>`"
-            f":{role}:`~{fullname}{tail}`"              # e.g. ":attr:`~mymod.mysubmod.MyClass.my_property.my_subproperty`"
+        f":{role}:`~{fullname}`"                    # e.g. ":class:`~mymod.mysubmod.MyClass`"
+        f":{role}:`~{fullname}`"                    # e.g. ":class:`~mymod.mysubmod.MyClass`"
+        f":{role}:`{name}{tail}<{fullname}{tail}>`" # e.g. ":attr:`MyClass.my_property.my_subproperty<mymod.mysubmod.MyClass.my_property.my_subproperty>`"
+        f":{role}:`~{fullname}{tail}`"              # e.g. ":attr:`~mymod.mysubmod.MyClass.my_property.my_subproperty`"
 
     """
+
     def repl(match: re.Match[str]) -> str:
         role = match[1]
         short = match[2] is not None
@@ -244,30 +509,34 @@ def simple_crossref_repl(name: str, fullname: str) -> Callable[[re.Match[str]], 
         if short:
             return f":{role}:`~{fullname}{tail}`"
         return f":{role}:`{name}{tail}<{fullname}{tail}>`"
+
     return repl
 
+
 def labelled_crossref_pattern(name: str) -> re.Pattern[str]:
-    r"""
-        Pattern for labelled imports:
+    """
+    Pattern for labelled imports:
 
-        .. code-block :: python
+    .. code-block :: python
 
-            f":{role}:`{label}<{name}>`"       # e.g. ":class:`my class<MyClass>`"
-            f":{role}:`{label}<{name}{tail}>`" # e.g. ":attr:`my_property<MyClass.my_property>`"
+        f":{role}:`{label}<{name}>`"       # e.g. ":class:`my class<MyClass>`"
+        f":{role}:`{label}<{name}{tail}>`" # e.g. ":attr:`my_property<MyClass.my_property>`"
 
     """
     return re.compile(rf":([a-z]+):`([\.a-zA-Z0-9_]+)<{name}(\.[\.a-zA-Z0-9_]+)?>`")
 
+
 def labelled_crossref_repl(name: str, fullname: str) -> Callable[[re.Match[str]], str]:
-    r"""
-        Replacement function for the pattern generated by :func:`labelled_crossref_pattern`:
+    """
+    Replacement function for the pattern generated by :func:`labelled_crossref_pattern`:
 
-        .. code-block :: python
+    .. code-block :: python
 
-            f":{role}:`{label}<{fullname}>`"       # e.g. ":class:`my class<mymod.mysubmod.MyClass>`"
-            f":{role}:`{label}<{fullname}{tail}>`" # e.g. ":attr:`my_property<mymod.mysubmod.MyClass.my_property>`"
+        f":{role}:`{label}<{fullname}>`"       # e.g. ":class:`my class<mymod.mysubmod.MyClass>`"
+        f":{role}:`{label}<{fullname}{tail}>`" # e.g. ":attr:`my_property<mymod.mysubmod.MyClass.my_property>`"
 
     """
+
     def repl(match: re.Match[str]) -> str:
         role = match[1]
         label = match[2]
@@ -275,35 +544,39 @@ def labelled_crossref_repl(name: str, fullname: str) -> Callable[[re.Match[str]]
         if tail is None:
             return f":{role}:`{label}<{fullname}>`"
         return f":{role}:`{label}<{fullname}{tail}>`"
+
     return repl
 
-_crossref_subs: list[tuple[Callable[[str], re.Pattern[str]],
-                           Callable[[str, str], Callable[[re.Match[str]], str]]]] = [
+
+_crossref_subs: list[
+    tuple[
+        Callable[[str], re.Pattern[str]],
+        Callable[[str, str], Callable[[re.Match[str]], str]],
+    ]
+] = [
     (simple_crossref_pattern, simple_crossref_repl),
     (labelled_crossref_pattern, labelled_crossref_repl),
 ]
-r"""
-    Substitution patterns and replacement functions for various kinds of cross-reference scenarios.
+"""
+Substitution patterns and replacement functions for various kinds of cross-reference scenarios.
 """
 
+
 def _get_module_by_name(modname: str) -> ModuleType:
-    r"""
-        Gathers a module object by name.
-    """
-    # pylint: disable = exec-used, eval-used
-    exec(f"import {modname.split('.')[0]}")
-    mod: ModuleType = eval(modname)
+    """Gathers a module object by name."""
+    namespace: dict[str, Any] = {}
+    exec(f"import {modname} as _mymodule", namespace)
+    mod: ModuleType = namespace["_mymodule"]
     if not isinstance(mod, ModuleType):
         return None
     return mod
 
-def _get_obj_mod(app: Sphinx, what: str, fullname: str, obj: Any) -> Optional[ModuleType]:
-    r"""
-        Gathers the containing module for the given ``obj``.
-    """
+
+def _get_obj_mod(app: Sphinx, what: str, fullname: str, obj: Any) -> ModuleType | None:
+    """Gathers the containing module for the given ``obj``."""
     autodoc_type_aliases = app.config.__dict__.get("autodoc_type_aliases")
     name = fullname.split(".")[-1]
-    obj_mod: Optional[ModuleType]
+    obj_mod: ModuleType | None
     if autodoc_type_aliases is not None:
         if name in autodoc_type_aliases and fullname == autodoc_type_aliases[name]:
             modname = ".".join(fullname.split(".")[:-1])
@@ -311,7 +584,7 @@ def _get_obj_mod(app: Sphinx, what: str, fullname: str, obj: Any) -> Optional[Mo
             return obj_mod
     if what == "module":
         obj_mod = obj
-    elif what in ("function", "class", "method"):
+    elif what in ("function", "class", "method", "exception"):
         obj_mod = inspect.getmodule(obj)
     elif what == "property":
         obj_mod = inspect.getmodule(obj.fget)
@@ -322,14 +595,22 @@ def _get_obj_mod(app: Sphinx, what: str, fullname: str, obj: Any) -> Optional[Mo
         modname = ".".join(fullname.split(".")[:-2])
         obj_mod = _get_module_by_name(modname)
     else:
-        print(f"WARNING! Encountered unexpected value for what = {what} at fullname = {fullname}")
+        logger.warning(
+            f"Encountered unexpected value for what = {what} at fullname = {fullname}"
+        )
         obj_mod = None
     return obj_mod
 
-def _build_fullname_dict(app: Sphinx, fullname: str, obj_mod: Optional[ModuleType], ) -> dict[str, str]:
-    r"""
-        Builds a dictionary of substitutions from module global names to their fully qualified names,
-        based on :func:`inspect.getmodule` and `autodoc_type_aliases` (if specified in the Sphinx app config).
+
+def _build_fullname_dict(
+    app: Sphinx,
+    fullname: str,
+    obj_mod: ModuleType | None,
+) -> dict[str, str]:
+    """
+    Builds a dictionary of substitutions from module global names to their fully qualified names,
+    based on :func:`inspect.getmodule` and `autodoc_type_aliases`
+    (if specified in the Sphinx app config).
     """
     autodoc_type_aliases = app.config.__dict__.get("autodoc_type_aliases")
     fullname_dict: dict[str, str] = {}
@@ -354,13 +635,21 @@ def _build_fullname_dict(app: Sphinx, fullname: str, obj_mod: Optional[ModuleTyp
                 fullname_dict[a_name] = a_fullname
     return fullname_dict
 
-def local_crossref_handler(app: Sphinx, what: str, fullname: str, obj: Any, options: Any, lines: list[str]) -> None:
-    r"""
-        Handler for Sphinx Autodoc's event
-        `autodoc-process-docstring<https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html#event-autodoc-process-docstring>`_
-        which replaces cross-references specified in terms of module globals with their fully qualified version.
+
+def local_crossref_handler(
+    app: Sphinx,
+    what: str,
+    fullname: str,
+    obj: Any,
+    options: Any,
+    lines: list[str],
+) -> None:
     """
-    # pylint: disable = too-many-arguments, too-many-locals
+    Replaces cross-references specified in terms of module globals with their fully qualified version.
+
+    Handler for Sphinx Autodoc's event
+    `autodoc-process-docstring <https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html#event-autodoc-process-docstring>`_
+    """
     obj_mod = _get_obj_mod(app, what, fullname, obj)
     fullname_dict = _build_fullname_dict(app, fullname, obj_mod)
     for sub_name, sub_fullname in fullname_dict.items():
@@ -371,10 +660,23 @@ def local_crossref_handler(app: Sphinx, what: str, fullname: str, obj: Any, opti
                 line = re.sub(pattern, repl, line)
             lines[idx] = line
 
+
+def on_config_inited(app: Sphinx, _: Any) -> None:
+    """Updates data structures based on app.config (conf.py)."""
+    PROPERTY_DESCRIPTORS.update(app.config.property_descriptors)
+    CACHED_PROPERTY_DESCRIPTORS.update(app.config.cached_property_descriptors)
+
+
+### 6. Register Sphinx Event Handlers ###
+
+
 def setup(app: Sphinx) -> None:
-    r"""
-        Registers handlers for Sphinx Autodoc's event
-        `autodoc-process-docstring<https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html#event-autodoc-process-docstring>`_
-    """
-    app.connect("autodoc-process-docstring", sigdoc_handler)
+    """Registers handlers for Sphinx events."""
+    app.add_config_value("property_descriptors", default=set(), rebuild="env")
+    app.add_config_value("cached_property_descriptors", default=set(), rebuild="env")
+    app.connect("config-inited", on_config_inited)
+
+    app.connect("autodoc-process-docstring", class_tracking_handler)
+    app.connect("autodoc-process-docstring", signature_doc_handler)
+    app.connect("autodoc-process-docstring", attr_doc_handler)
     app.connect("autodoc-process-docstring", local_crossref_handler)

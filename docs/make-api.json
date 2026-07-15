@@ -1,12 +1,14 @@
 {
     "pkg_name": "typing_validation",
-    "pkg_path": "../",
+    "pkg_path": "..",
     "apidocs_folder": "api",
     "toc_filename": "api-toc.rst",
+    "type_alias_dict_filename": "autodoc-type-aliases.json",
     "include_members": {},
-    "exclude_members": {
-        "typing_validation.validation": ["iskeyword", "issoftkeyword"]
-    },
+    "type_aliases": {},
+    "exclude_members": {},
     "include_modules": [],
-    "exclude_modules": []
+    "exclude_modules": [],
+    "member_fullnames": {},
+    "special_class_members": {}
 }
