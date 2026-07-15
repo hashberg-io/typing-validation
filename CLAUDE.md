@@ -35,7 +35,7 @@ Each gets a sub-branch off `v2`, carries the tests that cover it, and is merged 
 |---|---|---|---|---|
 | 1 | Errors and dev tooling | `errors` | `ValidationError`, `UnsupportedTypeError`, the test and lint setup | done |
 | 2 | Type resolution | `type-resolution` | annotation reading via `annotationlib`, qualifier stripping, forward-reference classification (§6) | done |
-| 3 | The interpreter | `validate` | the work stack and the whole dispatch chain, covering every form in TYPES.md; the plugin registry and `__validate__` hook (§7); `is_valid`, `validated`, `validated_iter`; the test corpus | not started |
+| 3 | The interpreter | `validate` | the work stack and the whole dispatch chain, covering every form in TYPES.md; the plugin registry and `__validate__` hook (§7); `is_valid`, `validated`, `validated_iter`; the test corpus | done |
 | 4 | The node model and configuration | `node-model` | interning, tiers, hash-cons recursion, totality memoisation, `can_validate`, `inspect_type` (§4, §3.5); the internal option manager (§8) | not started |
 | 5 | Diagnosis | `diagnose` | the failure tree and the second traversal (§3.6, §5); **messages stubbed** pending the deferred format round | not started |
 | 6 | The NumPy plugin | `numpy-plugin` | `typing_validation.numpy` (§7) | not started |
