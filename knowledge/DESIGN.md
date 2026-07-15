@@ -612,3 +612,61 @@ That last one deserves a real test rather than a convention, since [purity](#2-v
 ### Staging helps
 
 The implementation order in §12 means each mechanism is conformance-tested against a working predecessor: `validator` against `validate`, and `compiled_validator` against both. There is never a moment when two unproven implementations are being compared to each other.
+
+## 11. Benchmarking
+
+**The benchmark suite is a deliverable, not a diagnostic.** The entire justification for having three validators is performance. Without measurement, that justification is a hypothesis and the extra two mechanisms are unexplained complexity. The suite is what converts the design's central claim into something falsifiable.
+
+### What v1 measured, and why it did not work
+
+v1's `benchmark.py` described itself, accurately, as *"rough and messy basic benchmarking code"*. Its problems are worth naming, because they are the specification for what to do instead.
+
+**The unit was wrong.** It reported *nanoseconds per byte*, dividing elapsed time by `sys.getsizeof` of the data. But validation work is proportional to the number of type-nodes visited, not to bytes occupied, and the two are unrelated:
+
+- Validating any `int` against `int` is exactly one `isinstance` call, while `sys.getsizeof` of an integer ranges from 28 to 72 bytes with its magnitude. The reported figure moves 2.6× while the work is constant.
+- Across types the ratio is incommensurable: `int` carries 28 bytes per unit of work, `bytes(20)` carries 53, and a 20-element `list[int]` carries 10.3. So v1's headline figures — `0.431 ns/B` for `list` against `4.817 ns/B` for `int` — do not mean list validation is eleven times faster. They mean lists have more bytes per `isinstance` call. The numbers cannot be compared to each other at all.
+
+**The union figure was fudged.** Byte counts were multiplied by the number of union members *"for uniformity of comparison"*, which is a correction with no principle behind it.
+
+**Nothing was reproducible.** Seeds came from `int(time())`, so no two runs measured the same data and no run could be re-examined.
+
+**There was no meaningful baseline.** `sumprod` and `append` establish that Python does arithmetic, not whether validation is fast.
+
+### Units
+
+- **Nanoseconds per call**, for a fixed type and value — the number a user actually experiences.
+- **Nanoseconds per type-node visited**, for comparing across shapes — the closest thing to a unit of work, and what `ns/B` was groping toward.
+
+Both are reported. Neither is divided by anything the caller does not control.
+
+### Baselines
+
+Each measurement is stated against something meaningful:
+
+| Baseline | Answers |
+|---|---|
+| **A hand-written validator** for that exact type | Does `compiled_validator` deliver what it claims? |
+| **Bare `isinstance`** | The absolute floor for a scalar check. |
+| **v1**, where the types are comparable | Did the rewrite regress anything? |
+
+The hand-written baseline is the important one, because §3.4's claim is precise and therefore falsifiable: *code as if you wrote it yourself, modulo a single function call*. That claim should be tested directly rather than admired. If a compiled validator is materially slower than the hand-written equivalent, the inlining budget or the emitter is wrong, and the benchmark should be what says so.
+
+### The break-even point
+
+For each type, the suite reports **how many values must be validated before `validator(t)` overtakes `validate`, and before `compiled_validator(t)` overtakes `validator(t)`.**
+
+Given a per-call cost and a construction cost, this is arithmetic. But it is the only number that answers the question a user actually has — *"which of these three should I use?"* — and it turns the choice from folklore into a lookup. A `compiled_validator` that only pays for itself after ten million values is a fact worth publishing, in either direction.
+
+### Coverage
+
+Scalars; flat collections; deeply nested collections; mappings; fixed and variadic tuples; unions of plain classes (the `isinstance`-tuple fast path of §3.2) *and* unions of structured members (the sequential-attempt path), because those are different mechanisms and must not be averaged together; `TypedDict`s, including the annotation-resolution cost of §6; and recursive aliases, where §3.4 must stop unrolling.
+
+**Both outcomes are measured.** The success path is the one that matters, but §5's failure path pays for a *second traversal*, and that cost is currently an assumption — "failures are exceptional, so paying twice is free". Assumptions in a performance argument are exactly what benchmarks are for.
+
+### Hygiene
+
+Fixed seeds. Captured environment — Python build, machine, versions — because a number without its context is unreadable six months later. Results tracked over time rather than gated in CI, since a hard threshold on a noisy shared runner produces flakes and then gets disabled, which is worse than not having it.
+
+### The number that matters most
+
+**`validate` must not be slower than v1.** It is the function that everybody calls and most people will only ever call. If the redesign buys two new mechanisms at the cost of making the common path slower, it has failed, regardless of what the other two achieve. That comparison is the first benchmark to exist and the last one allowed to regress.
