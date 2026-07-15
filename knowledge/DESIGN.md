@@ -223,3 +223,73 @@ All three validators fail hard and say only *that* they failed. Everything a use
 It takes the value as well as the type, because the message must say *where* in the value the failure was: `invalid value at idx: 2`, inside `at key: 'a'`. A structural description of the type alone cannot say that.
 
 The message format is deliberately unsettled. See §14.
+
+## 4. The type node model
+
+Everything in §3 except `validate` is built on one class: an **interned node**, one per distinct type, holding the type it was built from, its form, its interned children, and its memoised properties. `validator`, `compiled_validator`, `inspect_type` and `diagnose` are all methods on it.
+
+That one class is simultaneously the unit of canonicalisation, the unit of deduplication, the thing `inspect_type` reports, the thing that emits a closure, the thing that emits source, and the thing that explains a failure. It can be all of those at once precisely because none of them is on a hot path (§3.1).
+
+### 4.1 Interning
+
+**The cache key is `t` itself. There is no canonicalisation pass.**
+
+This is not a simplification we settled for; it is what the type surface asked for. The requirement was to preserve distinctions rather than dissolve them — an alias should report as itself, `Annotated` metadata must stay identity-bearing so that acting on it later remains possible, `NewType` should report as itself. Python's own type equality already does exactly that:
+
+| Fact | Consequence |
+|---|---|
+| `MyInt == int` is `False` | aliases keep their identity |
+| `UserId == int` is `False` | `NewType` keeps its identity |
+| `Annotated[int, 'a'] == Annotated[int, 'b']` is `False` | metadata is identity-bearing |
+| `list[int] == list[int]`, hashes equal | structural dedup is free |
+| `Union[int, str] == Union[str, int]`, hashes equal | unions merge |
+
+Unions are the *only* form Python merges, and it does the rest of the work too: nested unions flatten, `Union[int, int]` collapses to `int`, `Union[X]` degenerates to `X`, `Optional[X]` becomes `X | None`. So "normalise unions and nothing else" is not a rule we implement — **it is what falls out of using `t` as the key**, and the entire canonicalisation layer disappears.
+
+Three problems dissolve with it. Aliases carry `__name__` (`repr(JSON)` is literally `JSON`), so recursion roots get real names for free — no non-identity-bearing label field, no walk-order dependence on which of two equal aliases wins. `NewType` carries `__supertype__`, so it displays as itself and checks as its supertype. And metadata is identity-bearing from day one, so the `Annotated` door stays open without a future cache-key migration.
+
+Each node keeps the `t` it was built from, so display is `repr(t)`.
+
+**The price**, paid knowingly: for unions the first-interned spelling wins the display, so `validate(x, Union[str, int])` may report `int | str`. This is forced — Python considers them equal and hashes them equally, so any cache keyed on `t` merges them — and defensible, since they *are* the same type.
+
+#### Interning is never semantically observable
+
+**This is a hard invariant, not an aspiration.** The cache may be cold, warm, cleared or bypassed, and no verdict may change. It has teeth in two places.
+
+**Unhashable types skip the cache.** `Annotated[int, {"ge": 0}]` is unhashable, because metadata participates in the hash — and that is precisely the pydantic-style idiom the `Annotated` decision exists to accommodate, so it is not a corner case. Such a type simply builds a fresh node and forgoes sharing. It remains fully supported. v1's blanket refusal of unhashable types becomes unnecessary.
+
+**Caller-frame resolution is forbidden.** It is this invariant, rather than taste, that rules out resolving inline forward references against the caller's frame: a node for `list["JSON"]` would then mean different things depending on which caller interned it first. See §6.
+
+### 4.2 Recursion
+
+The node graph is **not a DAG**. PEP 695 makes `type JSON = int | str | list[JSON] | dict[str, JSON]` idiomatic, so recursive types are ordinary rather than exotic, and each one puts a cycle in the graph.
+
+Interning is what makes this tractable, which is a happy return on a decision made for other reasons. **Hash-cons before descending**: intern the node *before* building its children, so a back-edge finds the in-progress node and construction terminates.
+
+**A cycle can only close through a name** — a PEP 695 alias or a forward reference — because a name is the only way a type can mention itself. Both are always hashable. So cycle roots are always in the cache, and cycle detection works even when unhashable leaves (§4.1) sit inside the cycle. The two rules do not collide.
+
+Each mechanism then meets the back-edge differently, and the differences are the whole reason the mechanisms are separate:
+
+| Mechanism | At a back-edge |
+|---|---|
+| `validate` | nothing; a work stack traverses a cycle without noticing |
+| `validator` | late binding — read the node's validator slot at call time (§3.3) |
+| `compiled_validator` | stop unrolling; emit a call to the root's function (§3.4) |
+
+### 4.3 Lifetime and scoping
+
+**By default the cache lives forever and holds strong references.** Types are usually module-level objects that outlive any cache anyway, so for the overwhelmingly common case there is nothing to manage and nothing to pay.
+
+The exception is real, though. A strong reference to a type transitively pins the classes it mentions, and through them their modules and closures. A long-running process that builds types dynamically — synthesised `TypedDict`s, classes made in a factory, types built per request — accumulates them forever. So the cache is manageable:
+
+- **Selective removal**, to drop a specific type's node.
+- **A full clear.**
+- **Scoped caching**, via a context manager, for callers who want the sharing without the retention.
+
+Scoped caching is **tiered**. Entering the context pushes a new tier; while it is active, lookups consult the tiers innermost-first, and every new node is created in the innermost tier. Exiting drops that tier whole, in one operation, with no per-entry bookkeeping.
+
+The tiering is sound because **references only ever point outward**. A node created while a tier is active lives in that tier and may reference nodes in enclosing tiers, which outlive it. Nothing in an enclosing tier can reference into an inner one, because while the inner tier is active it is where all new nodes go. So dropping a tier can never leave a dangling reference behind it.
+
+And dropping a tier can never change an answer, only a cost — which is §4.1's invariant paying for itself a third time. That is what makes an eviction API safe to expose at all: without the invariant, "clear the cache" would be a semantic operation, and no user could be expected to reason about it.
+
+The cache is a plain dictionary. See §13 on why that suffices.
