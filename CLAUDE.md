@@ -27,36 +27,21 @@ Each stage manufactures the oracle for the next, so the order is not negotiable:
 
 Every breaking change lands in 2.0. Stages 2 and 3 are purely additive.
 
-### 2.1 milestones
+### What the three mechanisms turned out to be
 
-Each gets a sub-branch off `main`, carries the tests that cover it, and is merged only once they pass.
+Each release's design question was settled by **measuring before building**, and in both cases the measurement contradicted the design. Worth knowing before touching any of them.
 
-| # | Milestone | Branch | Contents | Status |
-|---|---|---|---|---|
-| 1 | The compositor | `validator` | `validator(t)`: a closure per node form, composed over the interned graph; late binding at back-edges; `UnsupportedTypeError` raised eagerly at construction. Added to `MECHANISMS`, so the whole corpus and the deep-value tests run through it | done |
-| 2 | Break-even | `validator-benchmarks` | §11's unanswered number: how many values must be validated before `validator(t)` overtakes `validate`. Construction cost, per-call cost, and the crossover | done |
-| 3 | Release polish | `validator-docs` | README, guide, `DESIGN.md`, and the 2.1 release | done |
+**2.1 — `validator`.** §3.3 assumed closures that call one another. That is 3× `validate` and raises `RecursionError` once per level of the *value*, so it crashes on exactly what `validate` uses a work stack to survive. Closures that all push are safe and 1.16×, which earns no second mechanism. The answer: **depth grows only where a check can descend**, so a container *calls* the children that cannot and *pushes* the ones that can. "Can descend" belongs to the check, not to the node's children — a union of plain classes has members and still collapses to one `isinstance`.
 
-**The composition shape was settled by measurement, and it is not what §3.3 assumed** — see the section for the table. Closures that call one another are 3× `validate` and raise `RecursionError` on the deep values `validate` handles; closures that all push are safe and 1.16×, which earns nothing.
+**2.2 — `compiled_validator`.** Unrolling is safe because **an acyclic type bounds the value's depth**: `list[int]` against a value nested twenty thousand deep fails its `isinstance` at level two and never descends. A cycle removes the bound, so a back-edge stops unrolling and calls the composed validator. Same for a plugin, which has no source to inline. Where there is nothing to unroll at all, `compiled_validator(t)` **returns `validator(t)`** — wrapping it measured slower than being it.
 
-**Depth grows only where a check can descend.** So a container *calls* the children that cannot and *pushes* the ones that can: 2.75× `validate`, surviving twenty thousand levels. "Can descend" belongs to the *check*, not to the node's children — a union of plain classes has members and still collapses to one `isinstance`.
+**The inlining budget matters far less than §14 expects.** There is no cliff: cost is linear, and unrolling always repays (~1 value for `list[int]`, 465 for a forty-field `TypedDict`). It is a guard rail against a surprising stall, not a tuning knob. Two traps: it must count nodes **with multiplicity** (counting distinct nodes makes it do nothing, since interning means a tuple of twenty identical dictionaries has six), and **nesting is a second dimension** — CPython refuses more than 100 levels of indentation, which no node budget can see.
 
-### 2.2 milestones
+## Where to pick up
 
-Each gets a sub-branch off `main`, carries the tests that cover it, and is merged only once they pass.
-
-| # | Milestone | Branch | Contents | Status |
-|---|---|---|---|---|
-| 1 | Benchmark coverage | `compiled-benchmarks` | The cases that will judge the emitter, **before** it exists: heavily-shared types, which are what the inlining budget trades against and which nothing currently stresses; a NumPy case, since a plugin is a de-optimisation boundary and the only way to know its cost is to measure it; deep and recursive shapes | done |
-| 2 | The emitter | `compiled-validator` | Source emission, `exec`, one function per recursion root, a call at every plugin. Added to `MECHANISMS` | done |
-| 3 | The inlining budget | `inlining-budget` | Tuned against milestone 1's data, not against argument | done |
-| 4 | Release polish | `compiled-docs` | README, guide, `DESIGN.md`, the 2.2 release — and the benchmark table, **discussed before it is executed** | done |
-
-**The emitted shape, decided:** nested loops where the *type* bounds the depth, a stack at cycles.
-
-This is the same fork 2.1 faced, one level up, and the same answer. It rests on an observation that only holds for emitted code: **for an acyclic type, the value can only nest as deep as the type says**, so fully-unrolled nested loops cannot recurse at all — `list[int]` against a value nested twenty thousand deep fails its `isinstance` at level two and never descends. Depth becomes unbounded only through a cycle, which is exactly where a back-edge must push instead of call.
-
-**The bet paid.** Emitted code runs at 11.5 ns/node against a hand-written 11.1 — 5.1× `validate`, 1.86× `validator` — so §3.4's claim is measured rather than admired. A recursive alias or a plugin degrades to the composed validator, which is safe at any depth.
+- **Marshalling** is the only unbuilt stage, and it is blocked: a stale cached validator is the worst failure this library could have, and §14 has no answer. Read §12 and §14 first.
+- **PyPI for 2.1 and 2.2** is outstanding; Stefano uploads from his own machine.
+- **`benchmark/RESULTS.md`** is regenerated by `python -m benchmark --write` and committed deliberately. CI does **not** check it is current, on purpose: a threshold on a noisy shared runner flakes and then gets disabled.
 
 ## Waiting on Python 3.15
 
