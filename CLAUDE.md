@@ -27,6 +27,20 @@ Each stage manufactures the oracle for the next, so the order is not negotiable:
 
 Every breaking change lands in 2.0. Stages 2 and 3 are purely additive.
 
+### 2.1 milestones
+
+Each gets a sub-branch off `main`, carries the tests that cover it, and is merged only once they pass.
+
+| # | Milestone | Branch | Contents | Status |
+|---|---|---|---|---|
+| 1 | The compositor | `validator` | `validator(t)`: a closure per node form, composed over the interned graph; late binding at back-edges; `UnsupportedTypeError` raised eagerly at construction. Added to `MECHANISMS`, so the whole corpus and the deep-value tests run through it | not started |
+| 2 | Break-even | `validator-benchmarks` | §11's unanswered number: how many values must be validated before `validator(t)` overtakes `validate`. Construction cost, per-call cost, and the crossover | not started |
+| 3 | Release polish | `validator-docs` | README, guide, `DESIGN.md`, and the 2.1 release | not started |
+
+**The composition shape is settled by measurement, and it is not what §3.3 assumed.** Composing closures that call each other directly is 3× faster than `validate` per node — and raises `RecursionError` on exactly the deeply nested values `validate` handles, which would make the two mechanisms disagree. Composing closures that push onto a shared work stack is safe and only 1.16× faster, which does not earn a second mechanism at all.
+
+The resolution: **depth grows only at container boundaries.** A leaf check cannot descend, so a container calls its leaf children *directly* — free and safe — and pushes only children that can themselves descend. Measured at 2.9× `validate` on `list[int]`, while surviving a value nested twenty thousand deep.
+
 ## Waiting on Python 3.15
 
 - **`typing.TypeForm` replaces the `typing_extensions` import.** PEP 747 is already adopted: `validated` takes `TypeForm[T]`, imported under `TYPE_CHECKING` so the library keeps zero runtime dependencies (typeshed carries the stub, so mypy needs nothing installed, and the docs read annotations as strings). The one cost is that `get_type_hints` on those functions raises `NameError` until the name exists at runtime. `test_typeform.py` fails deliberately when `typing.TypeForm` appears, and says what to change.
