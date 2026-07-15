@@ -69,3 +69,19 @@ Three things, in order of significance:
 `typing-validation` validates *types*, not *constraints*. It answers "is this value an `int`", never "is this value positive". Whether that stays true forever is deliberately left open — see [TYPES.md](TYPES.md) on `Annotated` — but nothing in 2.0 pursues it.
 
 It is also not a coercion, parsing or serialisation library. It inspects values and reports; it never converts them.
+
+## 2. Validation semantics
+
+**The semantics live in [TYPES.md](TYPES.md).** This section exists to say why, and to state what that document governs.
+
+Each mechanism in §3 implements validation independently, in whatever shape is fastest for it. They share no implementation code. What they share is a *meaning*: given the same value and the same type, they must reach the same verdict. That meaning has to be written down somewhere, and it cannot be written down in code without reintroducing the coupling §3.1 exists to avoid.
+
+So `TYPES.md` is not documentation *of* the implementation. It is the specification the implementations answer to. **Where a mechanism and the catalogue disagree, the catalogue is right and the code is wrong** — that is the whole basis on which duplicated implementations are safe, and §10 exists to enforce it.
+
+Two rules from that document constrain the architecture directly, so they are restated here.
+
+**Totality.** If any component of a type is unsupported, the whole type is unsupported; there is no mode in which the checkable parts are checked and the rest waved through. Architecturally this means "supported" is a property computed once per type and propagated: an unsupported leaf poisons every type containing it. Because nodes are interned (§4.1), that computation is memoised for free, and `can_validate` is a lookup rather than a walk.
+
+**Purity.** Validation never mutates or consumes the value it inspects. Three parts of this design rest on it. Union members are tried in sequence, and a member that fails part-way must leave nothing behind for the next to trip over (§3.2). The mechanisms must agree on every input, which they cannot do if checking changes what is being checked (§10). And a failed fast path hands the *same value* to `diagnose` for a second, slower traversal (§5) — which would be incoherent if the first traversal had disturbed it.
+
+The forms that cannot honour purity are exactly the forms that need special API: a one-shot iterator cannot be inspected without being consumed, which is why `validated_iter` exists (§9).
