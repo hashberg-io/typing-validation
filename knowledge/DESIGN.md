@@ -85,3 +85,141 @@ Two rules from that document constrain the architecture directly, so they are re
 **Purity.** Validation never mutates or consumes the value it inspects. Three parts of this design rest on it. Union members are tried in sequence, and a member that fails part-way must leave nothing behind for the next to trip over (§3.2). The mechanisms must agree on every input, which they cannot do if checking changes what is being checked (§10). And a failed fast path hands the *same value* to `diagnose` for a second, slower traversal (§5) — which would be incoherent if the first traversal had disturbed it.
 
 The forms that cannot honour purity are exactly the forms that need special API: a one-shot iterator cannot be inspected without being consumed, which is why `validated_iter` exists (§9).
+
+## 3. Architecture
+
+There are five mechanisms. Three validate:
+
+| Mechanism | Cost to set up | Cost to run | For |
+|---|---|---|---|
+| `validate(val, t)` | none | good | validating a value once and moving on |
+| `validator(t)` | low | better | validating many values against a fixed type |
+| `compiled_validator(t)` | high | best | validating very many values against a fixed type |
+
+And two explain:
+
+| Mechanism | For |
+|---|---|
+| `inspect_type(t)` | what a type is, structurally, and whether it can be validated |
+| `diagnose(val)` | why a validation failed, in detail |
+
+All three validators share one contract: **return `True`, or raise `TypeError`**. They are interchangeable, and observably identical on every input. Choosing among them is a performance decision and nothing else.
+
+### 3.1 The hot path and construction time
+
+One specification, several implementations. The obvious move is to factor the common logic into a shared table or a registry of per-form handlers, and have each mechanism consume it. That move is wrong, and understanding why is the key to this design.
+
+Indirection is not free, and on this hot path it is not cheap either. A dictionary lookup to find a handler, an attribute hop to reach its method, a bound-method call to invoke it — each is small, and each is paid *per node, per value, per call*. On `validate(12, int)` that overhead is the entire cost of the operation. A library whose whole purpose is to be fast enough to leave switched on cannot pay it.
+
+So the line is not shared-versus-duplicated. **The line is hot path versus construction time.**
+
+`validate` is the only hot mechanism. It is called once per value and forgets everything. It therefore **stands alone**: the type-form structure is written out explicitly in its body, with no registry, no handler objects, no table dispatch, and nothing that costs a lookup or an attribute access. It duplicates the semantics, deliberately.
+
+`validator`, `compiled_validator`, `inspect_type` and `diagnose` all run at construction time or at failure time. Sharing between them is free, because it never touches a hot path — so they share freely, hanging off a single interned node class (§4).
+
+Two corollaries fall out, and both matter.
+
+**`validate` must not build an intermediate representation.** Constructing a node graph and then interpreting it would be clean, and would cost an allocation per node per call — precisely the overhead the split exists to avoid. `validate` dispatches directly on the raw `t` as it walks, materialising nothing.
+
+**`validate` never consults the validator cache.** Not even to check for a hit. A cache lookup means hashing `t`, and `typing` objects do not hash cheaply. The separation is total: no mechanism ever calls into another's machinery, in either direction.
+
+The duplication this licenses is only safe because of §10. Four independent implementations of one specification are four places to drift, and the drift is silent — a `compiled_validator` that disagrees with `validate` produces a wrong answer with no exception. **The conformance suite is not test hygiene here; it is the structural member that makes the architecture stand up.**
+
+### 3.2 `validate`
+
+```python
+def validate(val: Any, t: Any, /) -> Literal[True]: ...
+```
+
+An interpreter. It walks the value and the type together in a single pass and answers yes or no.
+
+**Non-recursive**, via an explicit work stack. The motivation is not elegance but correctness: what threatens the call stack is the nesting depth of the *value*, not of the type. `list[int]` is a shallow type, and a list nested two thousand deep is a legal value for `list[list[...]]`. A recursive walker would raise `RecursionError` — an error that is neither a validation failure nor an honest one. The work stack also avoids a Python call per node, which is the single largest avoidable cost in a walk like this.
+
+Work items are `(value, type)` pairs. Conjunctive obligations — every item of a `list[int]`, every key and value of a `dict[K, V]` — are simply pushed, and the loop drains them. This is the overwhelmingly common case and it is where the flat loop pays off.
+
+**Unions are the exception**, because they are disjunctive: any member may satisfy them. The mechanism is flag-gating. Members are tried in sequence; a flag is set once a member validates; later members are skipped by testing the flag; and if the flag is still unset when the members run out, validation fails.
+
+The subtlety is that **a member attempt is a unit of success**, and the flag must be set by the unit completing — not by any individual obligation inside it. Given `list[int] | list[str]` and `[1, "a"]`, the `1` validating against `int` must not set the flag, because the attempt is not finished and will fail on `"a"`. A flat `(value, type)` stack has no representation of "this attempt", so one must be added: either a barrier marker that the loop drains down to, or a per-attempt scoreboard. It is cheap either way, but it does not fall out for nothing.
+
+This is also where [purity](#2-validation-semantics) earns its keep. Trying members in sequence is only sound because a failed attempt leaves nothing behind.
+
+**Most unions never reach that machinery.** Members that are plain classes collapse into a single `isinstance` call against a tuple: `int | None`, `str | bytes` and `int | str | None` — the overwhelmingly common shapes — become one `isinstance(val, (int, NoneType))` with no flag, no sequence and no attempts. Only parametrised members need sequential trial, so union handling is rare on real workloads.
+
+**Failure is hard and cheap.** `validate` tracks no path, allocates no failure objects, and threads no context. It knows *that* it failed, not *where*, and hands `(val, t)` to §5 to find out. The happy path pays nothing for the diagnostics, which is what allows those diagnostics to be as rich as we like.
+
+### 3.3 `validator`
+
+```python
+def validator(t: Any, /) -> Callable[[Any], Literal[True]]: ...
+```
+
+Builds a validation function specialised to a fixed type, by composing closures over the node graph (§4). Same contract as `validate`, same observable behaviour.
+
+Construction is cheap, and **structurally shared**: because nodes are interned on `t` itself, `list[int]` is analysed once and its validator reused everywhere it occurs — inside `dict[str, list[int]]`, inside `tuple[list[int], ...]`, and inside any other type mentioning it. The validator graph is a DAG over distinct sub-types rather than a tree over syntactic occurrences.
+
+**Recursion needs late binding, at back-edges only.** A validator for a recursive alias cannot capture its own validator at construction time, because it does not exist yet. The closure therefore reads the node's validator slot when called rather than capturing it. That is one indirection — paid only at the cycle, never on the acyclic majority of a type.
+
+### 3.4 `compiled_validator`
+
+```python
+def compiled_validator(t: Any, /) -> Callable[[Any], Literal[True]]: ...
+```
+
+Emits Python source specialised to the type, `exec`s it, and returns the result. Same contract, same observable behaviour.
+
+The goal is code equivalent to what a competent programmer would write by hand for that one type: flat, unrolled, with the `isinstance` checks inlined and no per-node dispatch of any kind. The cost is compile latency, paid once, deliberately, by a caller who has decided it is worth it.
+
+**Unions are easier here than in the interpreter.** Emitted code is lexically scoped, so a member attempt is a block with its own local flag, and nothing unwinds:
+
+```python
+_ok_0 = False
+if not _ok_0:
+    _m = True
+    if isinstance(v, list):
+        for _i in v:
+            if not isinstance(_i, int):
+                _m = False
+                break
+    else:
+        _m = False
+    _ok_0 = _m
+# ... next member, gated on _ok_0 ...
+if not _ok_0:
+    raise ...
+```
+
+Nested unions are handled by a variable-suffix convention, which is also what flattens the shared DAG back into distinct inlined occurrences.
+
+**A cycle cannot be unrolled.** Unrolling a recursive alias does not terminate. So the emitted artifact is not one function but a small set of mutually-referencing ones — **one per recursion root** — with the back-edges becoming real calls. Since a cycle can only close through a *name* (§4.2), the roots are named things, and the emitted functions can carry meaningful names rather than counters.
+
+**Unrolling needs a budget, because it works against sharing.** Sharing is what makes §3.3 cheap; unrolling destroys it by construction. A node referenced twenty times unrolls twenty times, and a nested `TypedDict` with forty fields explodes the emitted body. So the compiler needs an inlining policy — unroll small nodes, emit a call for large or heavily-shared ones — which is the classic inliner trade-off, with code size traded against call overhead.
+
+The consequence is that `compiled_validator(t)` yields *a set of flat functions calling one another*, whose boundaries are chosen by budget and by recursion. That turns out to be convenient for the persistent-cache work (§12), where each function is separately a code object.
+
+**Plugins are a de-optimisation boundary.** The compiler has no source for plugin-provided checks, so it can only emit a call into them (§7).
+
+### 3.5 `inspect_type`
+
+```python
+def inspect_type(t: Any, /) -> TypeStructure: ...
+```
+
+Returns a structured description of a type: its shape, its components, and whether each is supported.
+
+In v1 this was a side effect of a validation walk, obtained by passing an inspector *as the value* and having every branch record itself. In v2 it is a real artifact, built from the node graph, and the graph exists anyway to serve §3.3 and §3.4. Building one warms the other.
+
+`can_validate(t) -> bool` is then the trivial predicate: whether the graph contains any unsupported node. Because "supported" is memoised per interned node (§2, §4.1), this is a lookup and not a walk.
+
+When a type is unsupported, `inspect_type` reports the **whole** structure and marks precisely which component poisoned it. Totality means the answer is always "no", but it should never be an opaque "no".
+
+### 3.6 `diagnose`
+
+All three validators fail hard and say only *that* they failed. Everything a user reads about *why* is produced here, by a slower second traversal of the same `(val, t)`.
+
+**This is the single most valuable consequence of the design.** Because diagnostics are produced in exactly one place, there is exactly one implementation of them — so the conformance obligation between mechanisms (§10) reduces to *"do they agree on the boolean?"*, which is a far smaller thing to police than "do they agree on the message". And because the second traversal only ever runs on a failure, which is by definition exceptional, it may be as slow, allocating and thorough as it likes.
+
+`diagnose` is, in effect, v1's `validate` — recursive, allocating and rich — demoted from the hot path to diagnostics duty, where its costs stop mattering and its quality is the entire point.
+
+It takes the value as well as the type, because the message must say *where* in the value the failure was: `invalid value at idx: 2`, inside `at key: 'a'`. A structural description of the type alone cannot say that.
+
+The message format is deliberately unsettled. See §14.
