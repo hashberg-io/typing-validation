@@ -293,3 +293,43 @@ The tiering is sound because **references only ever point outward**. A node crea
 And dropping a tier can never change an answer, only a cost — which is §4.1's invariant paying for itself a third time. That is what makes an eviction API safe to expose at all: without the invariant, "clear the cache" would be a semantic operation, and no user could be expected to reason about it.
 
 The cache is a plain dictionary. See §13 on why that suffices.
+
+## 5. Failure model
+
+**Validators establish validity. They do not explain invalidity.** All three answer yes or no, and everything a user reads is produced afterwards, by `diagnose`, from the same `(val, t)`.
+
+### The happy path pays nothing
+
+This is the point of the arrangement. A validator tracks no path, threads no context, allocates no failure objects and formats no strings. It cannot tell you that the failure was at index 2 inside key `'a'`, because it never knew. On success — the case that dominates every real workload — the diagnostic apparatus costs exactly zero, which is what licenses it to be as thorough as we like on the rare occasions it runs.
+
+The trade is a second traversal on failure. Failures are exceptional by definition, so paying twice for them is free in every sense that matters.
+
+### Control flow is exception-free
+
+v1 used exceptions for control flow: each union member was tried inside a `try`/`except TypeError`, and every nested failure raised, was caught, was repackaged and was re-raised on the way out. Raising is not cheap, and a union of *n* structured members failing costs *n* raise/catch cycles plus the repackaging at each level.
+
+v2 raises **once**, at the very end, if at all. Union members are flag-gated (§3.2, §3.4), so a member failing is a boolean, not an exception. The interpreter's loop contains no exception handling whatsoever; it sets a flag and stops. The single `raise` happens above the loop.
+
+### The exception
+
+Validation failure raises a `TypeError` subclass carrying the structured failure tree as a proper attribute.
+
+Being a `TypeError` subclass keeps the v1 contract — existing `except TypeError` handlers keep working — while the structure is reachable without v1's `setattr(error, "validation_failure", …)` smuggling. Programmatic access is then just an attribute on a caught exception, which is what `get_validation_failure` was for.
+
+**`latest_validation_failure` and `get_validation_failure` are removed.** The first was backed by a module-level global *and* by `sys.last_value`, an interpreter-wide slot; it required being called immediately after the failure, cleared itself on read, and was unsound under any re-entrancy. The second is subsumed by an ordinary attribute access. Neither survives a design where the failure is simply attached to the exception you already caught.
+
+### `is_valid` does not diagnose
+
+```python
+def is_valid(val: Any, t: Any, /) -> bool: ...
+```
+
+`is_valid` catches the hard failure and returns `False`. **It does not build the failure tree**, because a caller who wanted the explanation would have called `validate` and caught the exception. v1 set the global failure state here, which meant every `is_valid` miss paid for diagnostics nobody had asked for. A caller who wants the reason should use `validate`; a caller who wants a boolean should get a boolean at boolean prices.
+
+### When the mechanisms disagree
+
+There is one pathological case worth naming: a validator fails, `diagnose` re-walks the same value and finds nothing wrong.
+
+That is a library bug — a mechanism has drifted from the catalogue — and it must be reported as one. `diagnose` must never respond to a reported failure with an implicit "actually, it's fine": the failure is not swallowed, and no `TypeError` is silently downgraded to success. It raises an internal error saying that validation failed but diagnosis could not reproduce it, and asks for a report.
+
+This is exactly the drift §10 exists to prevent, and the reason the conformance suite is load-bearing rather than decorative.
