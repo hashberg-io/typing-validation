@@ -19,7 +19,7 @@ Keep them that way.
 | Release | Contents | Status |
 |---|---|---|
 | **2.0** | `validate` and everything around it — the interpreter, node model, failure model, resolution, plugins | **released** (tag `v2.0.0`) |
-| **2.1** | `validator` — closure composition | **implemented**, unreleased |
+| **2.1** | `validator` — closure composition | **released** (tag `v2.1.0`) |
 | **2.2** | `compiled_validator` — codegen via `exec` | not started |
 | later | marshalling — persistent bytecode cache | blocked on an unsolved staleness problem (DESIGN.md §14) |
 
