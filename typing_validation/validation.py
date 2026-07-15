@@ -34,6 +34,7 @@ from collections.abc import (
 )
 from types import GenericAlias
 from typing import (
+    TYPE_CHECKING,
     Annotated,
     Any,
     ByteString,
@@ -60,6 +61,20 @@ from .plugins import (
     unsupported_explanation,
 )
 from ._resolution import resolve, strip_qualifiers
+
+if TYPE_CHECKING:
+    # PEP 747. `type[T]` is what a validation library reaches for and is wrong:
+    # it rejects `validated(x, int | str)`, `Literal["a", "b"]` and `None` — the
+    # most ordinary things anyone validates against — because a union, a literal
+    # and None are type *forms* rather than classes. TypeForm[T] is the form of
+    # that distinction, and mypy already infers through it.
+    #
+    # The import is type-checking-only, so this stays a zero-dependency library:
+    # the name is never looked up at runtime, typeshed carries the stub so mypy
+    # needs nothing installed, and the docs read annotations as strings. The one
+    # cost is that get_type_hints on these functions raises NameError until
+    # typing.TypeForm lands, expected in 3.15.
+    from typing_extensions import TypeForm
 
 __all__ = ("is_valid", "validate", "validated", "validated_iter")
 
@@ -173,7 +188,7 @@ def is_valid(val: Any, t: Any, /) -> bool:
     return _check(val, t)
 
 
-def validated[T](val: Any, t: type[T], /) -> T:
+def validated[T](val: Any, t: TypeForm[T], /) -> T:
     """
     Validate a value against a type and return it, for use in an expression.
 

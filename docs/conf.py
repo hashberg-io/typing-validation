@@ -111,6 +111,9 @@ skip_missing_references: set[str] = {
     # Annotated under TYPE_CHECKING in the cache module, which sits below the
     # node model and must not import it for real.
     "TypeNode",
+    # PEP 747, imported under TYPE_CHECKING so that the library keeps no runtime
+    # dependency. Resolves here once typing.TypeForm lands, expected in 3.15.
+    "TypeForm",
     # typing.NewType is a class in 3.14, and the stdlib inventory does not carry
     # it as the function the docstring naturally calls it.
     "typing.NewType",

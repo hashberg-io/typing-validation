@@ -3,6 +3,11 @@ typing_validation.validation
 
 .. automodule:: typing_validation.validation
 
+TYPE_CHECKING
+-------------
+
+.. autodata:: typing_validation.validation.TYPE_CHECKING
+
 is_valid
 --------
 
