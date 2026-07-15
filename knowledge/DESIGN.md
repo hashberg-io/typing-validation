@@ -722,3 +722,41 @@ Stage 1 alone is shippable, and there is a case for shipping it *as* 2.0: it car
 The counter-argument is that `validator` and `compiled_validator` are the *reason* for the rewrite, and a 2.0 without them is a modernisation wearing a major version.
 
 This is a decision to take deliberately rather than by drift. See §14.
+
+## 13. Assumptions and non-goals
+
+Written down because an assumption nobody recorded is one nobody can notice going stale.
+
+### No free-threading support
+
+The intern cache is a plain dictionary, and we rely on the GIL.
+
+Worth being precise about what that costs, because the answer is not what one would guess. Under a free-threaded build, two threads racing to intern the same type would each build a node and one would win — and by §4.1's invariant that is **a wasted allocation, not a wrong answer**. Interning is never semantically observable, so even a thoroughly racy cache stays correct. Most of what looks alarming here is benign.
+
+The exception is precise and worth recording, because it is the thing that would actually need doing: **hash-cons-before-descending** (§4.2) publishes a node *before* its children exist, so that back-edges can find it. Under concurrency, another thread can look up that type and receive a node that is not yet built. That is a genuine correctness hazard, it lives at exactly one point in the design, and it is where free-threading support would have to start.
+
+Validation itself is [pure](#2-validation-semantics) and therefore thread-safe on the value side. The cache is the only shared mutable state in the library.
+
+### Types are immutable once used
+
+**A type's meaning must not change after it has been validated against.**
+
+This is a real constraint and not a pedantic one, because violating it breaks the mechanisms' equivalence — the property everything else rests on. `validate` reads a `TypedDict`'s annotations live on each call (§6), while `validator(t)` snapshots them at construction. Mutate `TD.__annotations__` between the two and they will disagree: the interpreter sees the new fields, the constructed validator sees the old. Both are behaving correctly; the assumption underneath them has been violated.
+
+So mutating a class's annotations, bases or fields after validating against it is undefined behaviour. In practice types are module-level and defined once, which is why this is a footnote rather than a defect — but it is the same problem stage 4's staleness question (§12) faces in a harder form, and the two should be solved with one idea if either is.
+
+### Types, not constraints
+
+`typing-validation` answers *"is this value an `int`"*, never *"is this value positive"*. Whether that holds forever is deliberately open — [TYPES.md](TYPES.md) keeps `Annotated` metadata identity-bearing precisely so the door stays usable — but nothing in 2.0 walks through it, and no release promises to.
+
+### Not a coercion library
+
+It inspects and reports. It never converts, parses, serialises or repairs. A value is valid or it is not; making it valid is the caller's business.
+
+### Python 3.14 and above
+
+No back-compatibility, ever, in this major version. §1 lists what that deletes; the list is long enough to justify the floor on its own.
+
+### Zero runtime dependencies
+
+Part of the contract, not a preference — §8 shows what happens when a library at the bottom of the stack forgets it.
