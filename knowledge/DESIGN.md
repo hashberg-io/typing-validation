@@ -201,10 +201,12 @@ The consequence is that `compiled_validator(t)` yields *a set of flat functions 
 ### 3.5 `inspect_type`
 
 ```python
-def inspect_type(t: Any, /) -> TypeStructure: ...
+def inspect_type(t: Any, /) -> TypeNode: ...
 ```
 
 Returns a structured description of a type: its shape, its components, and whether each is supported.
+
+It returns **the node itself**, rather than a separate `TypeStructure` artifact built from it. §4 says the node model is *one class* that is simultaneously the unit of interning, the thing `inspect_type` reports, the thing that emits a closure and the thing that explains a failure — so a second class mirroring it would be a copy that could drift, and there is nothing to hide: every field the node carries is a field a caller asking about a type wants.
 
 In v1 this was a side effect of a validation walk, obtained by passing an inspector *as the value* and having every branch record itself. In v2 it is a real artifact, built from the node graph, and the graph exists anyway to serve §3.3 and §3.4. Building one warms the other.
 
@@ -518,6 +520,14 @@ It validates option values with our own `validate`, which is pleasingly circular
 
 The scope is deliberately small. This is a settings object, not a configuration framework, and it stays in proportion to a surface that currently amounts to a handful of switches. If it ever grows past that, the honest move is to reconsider, not to grow a framework inside a validation library.
 
+### 2.0 ships no options at all
+
+This section anticipated a handful of switches and said their contents would be discovered while implementing. Implementing found **none**, so 2.0 ships no option manager.
+
+The two candidates both evaporated on inspection. Cache behaviour (§4.3) is an *API* — clear it, forget a type, scope it to a block — rather than a setting: each is a verb the caller invokes at a moment of their choosing, and none is a value read at validation time. The inlining budget (§3.4) is real, but it belongs to `compiled_validator` and therefore to 2.2.
+
+So the manager arrives with its first genuine option, which on current evidence is that budget. Building it now would mean designing a settings surface against zero clients — the same mistake §7 refuses to make with the plugin API, and with less excuse, since unlike the plugin boundary this one is not architectural and can be added at any time without a breaking change.
+
 The dependency direction is the general principle here: **this library sits at the bottom of the stack**, so anything it depends on must sit lower still. `optmanage` belongs *above* it, and using it here would invert the graph of our own projects.
 
 ## 9. Public API
@@ -534,7 +544,7 @@ validator(t, /) -> Callable[[Any], Literal[True]]           # §3.3
 compiled_validator(t, /) -> Callable[[Any], Literal[True]]  # §3.4
 
 # ask about a type
-inspect_type(t, /) -> TypeStructure                         # §3.5
+inspect_type(t, /) -> TypeNode                              # §3.5
 can_validate(t, /) -> bool
 
 # extend
@@ -817,12 +827,22 @@ There is no answer yet — only the requirement that a stale entry must be *dete
 
 §3.4 needs a policy — unroll small nodes, call into large or heavily-shared ones — and the thresholds are currently guesses. This resolves during stage 3 on §11's evidence rather than by argument now, but it is the place the compiled path is most likely to be wrong.
 
-### The `TypeStructure` API
+### ~~The `TypeStructure` API~~ — settled
 
-§3.5 says `inspect_type` returns structured type information and says nothing about its shape. v1's `TypeInspector` exposed `recorded_type`, `type_structure`, `type_annotation` and `unsupported_types`, which is a reasonable starting set, but it was designed around the constraints of the recording hack that produced it. Worth designing from what callers need instead.
+`inspect_type` returns the interned `TypeNode` itself. It carries the type it was built from, its form (an enum mirroring the catalogue), its children, labels for those children where they have names, whether it is supported, and why not when it is not. `unsupported_components()` names the culprits and `walk()` enumerates the graph, terminating on cycles.
+
+There is no separate artifact, for the reason in §3.5: §4's whole claim is that this is *one* class, and a mirror of it could only drift.
+
+Two shape decisions worth recording, because both are judgement calls:
+
+- **A `Literal` has no children.** Its arguments are values, not types.
+- **A generic class has no children, but a plugin-backed one has all its arguments as children.** A child is a component that bears on the verdict, and an unclaimed generic class's arguments explicitly do not (§7). A plugin's do, and totality must propagate through them — `NDArray[np.uint8 | np.float32]` has a union inside it that the core validates.
+
+### The cache-management spelling
+
+Settled provisionally as `clear_cache()`, `forget_type(t)` and a `scoped_cache()` context manager. The shape was agreed in §4.3; these are just names, and nothing depends on them.
 
 ### Smaller, deferred by agreement
 
-- **Plugin-contributed hint entries** (§7). Ours-alone is simpler; nothing forecloses opening it.
-- **The exact cache-management API** (§4.3). The shape is agreed — selective removal, full clear, scoped context manager — but not the spelling.
-- **The configuration surface** (§8). We know its shape and not yet its contents, because most of the switches will be discovered while implementing.
+- **Plugin-contributed manifest entries** (§7). Ours-alone is simpler; nothing forecloses opening it.
+- **The configuration surface** (§8). Settled for 2.0 by finding it empty: implementing discovered no options, so no manager ships. It arrives with its first real switch, which on current evidence is §3.4's inlining budget.
