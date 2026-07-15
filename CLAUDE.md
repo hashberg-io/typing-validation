@@ -20,7 +20,7 @@ Keep them that way.
 |---|---|---|
 | **2.0** | `validate` and everything around it — the interpreter, node model, failure model, resolution, plugins | **released** (tag `v2.0.0`) |
 | **2.1** | `validator` — closure composition | **released** (tag `v2.1.0`) |
-| **2.2** | `compiled_validator` — codegen via `exec` | not started |
+| **2.2** | `compiled_validator` — codegen via `exec` | **implemented**, unreleased |
 | later | marshalling — persistent bytecode cache | blocked on an unsolved staleness problem (DESIGN.md §14) |
 
 Each stage manufactures the oracle for the next, so the order is not negotiable: `validator` is conformance-tested against `validate`, and `compiled_validator` against both.
@@ -50,17 +50,13 @@ Each gets a sub-branch off `main`, carries the tests that cover it, and is merge
 | 1 | Benchmark coverage | `compiled-benchmarks` | The cases that will judge the emitter, **before** it exists: heavily-shared types, which are what the inlining budget trades against and which nothing currently stresses; a NumPy case, since a plugin is a de-optimisation boundary and the only way to know its cost is to measure it; deep and recursive shapes | done |
 | 2 | The emitter | `compiled-validator` | Source emission, `exec`, one function per recursion root, a call at every plugin. Added to `MECHANISMS` | done |
 | 3 | The inlining budget | `inlining-budget` | Tuned against milestone 1's data, not against argument | done |
-| 4 | Release polish | `compiled-docs` | README, guide, `DESIGN.md`, the 2.2 release — and the benchmark table, **discussed before it is executed** | not started |
+| 4 | Release polish | `compiled-docs` | README, guide, `DESIGN.md`, the 2.2 release — and the benchmark table, **discussed before it is executed** | done |
 
 **The emitted shape, decided:** nested loops where the *type* bounds the depth, a stack at cycles.
 
 This is the same fork 2.1 faced, one level up, and the same answer. It rests on an observation that only holds for emitted code: **for an acyclic type, the value can only nest as deep as the type says**, so fully-unrolled nested loops cannot recurse at all — `list[int]` against a value nested twenty thousand deep fails its `isinstance` at level two and never descends. Depth becomes unbounded only through a cycle, which is exactly where a back-edge must push instead of call.
 
 **The bet paid.** Emitted code runs at 11.5 ns/node against a hand-written 11.1 — 5.1× `validate`, 1.86× `validator` — so §3.4's claim is measured rather than admired. A recursive alias or a plugin degrades to the composed validator, which is safe at any depth.
-
-## Owed, at the end of 2.2
-
-- **How the benchmarks are presented.** With all three mechanisms in place the suite finally has something to compare, and printing it to a terminal stops being enough. Wanted: a **table artefact committed to the repo** — the numbers, the break-even points, and the captured environment, in a form a reader can consult without running anything. Raise it as its own round once `compiled_validator` lands; §11 says results are tracked over time rather than gated in CI, and this is what "tracked" should mean.
 
 ## Waiting on Python 3.15
 
@@ -79,6 +75,7 @@ $ .venv/bin/python -m pytest
 $ .venv/bin/python -m mypy
 $ .venv/bin/python -m black typing_validation test benchmark
 $ .venv/bin/python -m benchmark            # add --filter to narrow
+$ .venv/bin/python -m benchmark --write    # regenerate benchmark/RESULTS.md
 ```
 
 `mypy` and `pytest` are configured in `pyproject.toml` and need no arguments.

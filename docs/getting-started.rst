@@ -63,8 +63,29 @@ hundred for a scalar. So :func:`~typing_validation.validation.validate` for a
 one-off check, and :func:`~typing_validation.composition.validator` when the type
 is fixed and the values keep coming.
 
-One difference is deliberate. Because it analyses the whole type before it sees
-any value, it **rejects an unsupported type immediately**, where
+And when the values keep coming in very large numbers,
+:func:`~typing_validation.emission.compiled_validator` emits Python specialised
+to the type and compiles it:
+
+.. code-block:: python
+
+    >>> from typing_validation import compiled_validator
+    >>> check = compiled_validator(list[int])
+    >>> check([1, 2, 3])
+    True
+
+That runs at 11.5 nanoseconds per type-node against a hand-written check's 11.1 —
+within a few percent, the code you would have written yourself. It costs more to
+build, and it helps only where there is structure to unroll: for a recursive
+alias or a NumPy array it stops unrolling and hands back a
+:func:`~typing_validation.composition.validator`.
+
+``benchmark/RESULTS.md`` in the repository has the full table — every case, every
+mechanism, both outcomes, and the break-even points — with the machine it was
+measured on.
+
+One difference is deliberate. Because they analyse the whole type before seeing
+any value, both **reject an unsupported type immediately**, where
 :func:`~typing_validation.validation.validate` waits for a value to reach the
 unsupported part and may never notice:
 

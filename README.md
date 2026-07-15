@@ -65,26 +65,48 @@ one type, `validator` analyses it once and hands back a function:
 True
 ```
 
-Same contract, same verdict, **2.7× faster per call**. It repays the cost of
-building it almost immediately — the benchmark suite reports exactly when, per
-type:
+Same contract, same verdict, **2.7× faster per call**, and it repays the cost of
+building it within a handful of values.
 
-| Type | `validate` | `validator` | repays after |
-|---|---|---|---|
-| `list[int]` (1000 items) | 61.3 µs | 22.6 µs | 0 values |
-| `list[int]` (20 items) | 1.50 µs | 0.54 µs | 3 values |
-| `dict[str, int]` (20 items) | 2.79 µs | 1.04 µs | 3 values |
-| `tuple[int, str]` | 436 ns | 216 ns | 22 values |
-| `int` | 51.9 ns | 46.8 ns | 303 values |
-
-So: use `validate` for one-off checks, and `validator` when the type is fixed and
-the values keep coming. Run `python -m benchmark` for the numbers on your machine.
-
-One difference, and it is deliberate. `validator` analyses the whole type before
-it sees any value, so it **rejects an unsupported type immediately**:
+And when the values keep coming in very large numbers, `compiled_validator`
+emits Python specialised to the type and compiles it:
 
 ```python
-validator(list[Callable[[int], int]])   # UnsupportedTypeError, at once
+>>> from typing_validation import compiled_validator
+>>> check = compiled_validator(list[int])
+>>> check([1, 2, 3])
+True
+```
+
+That runs at **11.5 ns per type-node against a hand-written check's 11.1** — it
+is, within a few percent, the code you would have written yourself. It costs more
+to build, and it only helps where there is structure to unroll: for a recursive
+alias or a NumPy array it stops unrolling and hands back a `validator`, and the
+table says `never` rather than pretending otherwise.
+
+So: `validate` for one-off checks, `validator` when the type is fixed and the
+values keep coming, `compiled_validator` when there are very many of them.
+
+| Type | `validate` | `validator` | `compiled_validator` | hand-written |
+|---|---|---|---|---|
+| `list[int]` (1000 items) | 58.1 µs | 21.4 µs | 13.5 µs | 12.4 µs |
+| `list[int]` (20 items) | 1.5 µs | 540 ns | 287 ns | 284 ns |
+| `dict[str, int]` (20 items) | 2.7 µs | 1.0 µs | 559 ns | 548 ns |
+| `tuple[int, str]` | 428 ns | 215 ns | 80 ns | 64 ns |
+| `int` | 49 ns | 46 ns | 46 ns | 27 ns |
+
+**[`benchmark/RESULTS.md`](benchmark/RESULTS.md)** has the full table — every
+case, both outcomes, construction costs, and the break-even points that say
+exactly how many values each mechanism needs before it repays — with the machine
+it was measured on. Run `python -m benchmark` for your own numbers, or
+`python -m benchmark --write` to regenerate it.
+
+One difference, and it is deliberate. Both `validator` and `compiled_validator`
+analyse the whole type before seeing any value, so they **reject an unsupported
+type immediately**:
+
+```python
+validator(list[Callable[[int], int]])     # UnsupportedTypeError, at once
 validate([], list[Callable[[int], int]])  # True — no value reached the Callable
 ```
 

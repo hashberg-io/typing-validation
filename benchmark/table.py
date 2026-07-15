@@ -26,9 +26,8 @@ _UNSUPPORTED = "n/a"
 """
 The mechanism cannot validate this type at all, which is a different fact.
 
-v1 supports neither recursive aliases nor `Annotated`, and a single glyph for
-*"not measured"* and *"cannot be measured"* would quietly merge a gap in the
-suite with a gap in v1.
+A single glyph for *"not measured"* and *"cannot be measured"* would quietly
+merge a gap in the suite with a gap in the mechanism.
 """
 
 
@@ -203,8 +202,9 @@ def render(results: list[Result], environment: dict[str, Any], /) -> str:
         "",
         f"- `{_NOT_MEASURED}` — not measured. Nobody wrote a hand-written check",
         "  for this case, which says nothing about the case.",
-        f"- `{_UNSUPPORTED}` — the mechanism cannot validate this type at all.",
-        "  v1 supports neither recursive aliases nor `Annotated`.",
+        f"- `{_UNSUPPORTED}` — the mechanism cannot validate this type at all,",
+        "  so there is nothing to measure. Every case marked so is a v1 one, and",
+        "  every one is a PEP 695 alias, which v1 predates.",
         "- `never` — the analysis buys nothing here, so building a validator",
         "  cannot repay. A fact, not a gap: it is what a plugin and a recursive",
         "  alias both do, because each stops the unrolling.",

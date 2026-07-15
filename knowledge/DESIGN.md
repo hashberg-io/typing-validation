@@ -214,9 +214,37 @@ Nested unions are handled by a variable-suffix convention, which is also what fl
 
 **Unrolling needs a budget, because it works against sharing.** Sharing is what makes §3.3 cheap; unrolling destroys it by construction. A node referenced twenty times unrolls twenty times, and a nested `TypedDict` with forty fields explodes the emitted body. So the compiler needs an inlining policy — unroll small nodes, emit a call for large or heavily-shared ones — which is the classic inliner trade-off, with code size traded against call overhead.
 
-The consequence is that `compiled_validator(t)` yields *a set of flat functions calling one another*, whose boundaries are chosen by budget and by recursion. That turns out to be convenient for the persistent-cache work (§12), where each function is separately a code object.
-
 **Plugins are a de-optimisation boundary.** The compiler has no source for plugin-provided checks, so it can only emit a call into them (§7).
+
+#### Why unrolling is safe at all, which this section never said
+
+Unrolled loops nest once per level of the **type**, and for an acyclic type that bounds the **value**: `list[int]` against a value nested twenty thousand deep fails its `isinstance` at level two and never descends. So the emitted code cannot recurse, and can be exactly the nested loops one would write by hand.
+
+A cycle removes the bound — a recursive alias accepts a value of any depth — and cannot be unrolled anyway. So a back-edge is where unrolling stops, and there the emitted code calls into §3.3's composed validator, whose driver is a loop and therefore safe at any depth. That is the same de-optimisation a plugin forces, for the same reason.
+
+This is what makes the claim below true, and the measurement bears it out: **11.5 ns/node emitted against 11.1 hand-written** on `list[int]`, where §3.2 is 58.9 and §3.3 is 21.4.
+
+#### The budget's premise was wrong, and it needed a second dimension
+
+Three corrections, all from measuring.
+
+**There is no cliff to tune around.** The trade this section describes — code size against call overhead — is real but one-sided. Cost is *linear* in emitted size (sixty wide `TypedDict`s unroll to fourteen thousand lines and forty milliseconds), and unrolling *always* wins on speed, repaying its build cost within about one value for `list[int]`, twenty-eight for `dict[str, int]`, eighty-five for a twenty-fold shared sub-type and four hundred and sixty-five for a forty-field `TypedDict`. For a mechanism premised on very many values, all of those are nothing. So the budget is generous, and its job is to stop a monstrous type spending tens of milliseconds in the compiler by surprise. A guard rail, not a tuning knob.
+
+**It must count nodes with multiplicity.** Counting distinct nodes — the obvious reading of "unroll small nodes" — makes the budget do *nothing*: the graph is a DAG over distinct sub-types, so a tuple of twenty identical dictionaries has six of them and a hundred emitted ones. Every budget from 8 to 4096 produced byte-identical source until this was fixed. The quantity to bound is exactly the sharing that unrolling destroys.
+
+**Nesting is a second dimension, and a hard one.** CPython refuses more than **100 levels of indentation**. A type a hundred containers deep is 101 nodes, comfortably inside any sane node budget, and unrolls into source that will not compile. So there is a nesting limit as well, far below CPython's.
+
+#### When there is nothing to compile, this *is* §3.3
+
+A type with nothing to unroll — a literal, a structured union, a cycle, a plugin — would emit a function whose entire body is one call into the composed validator. That is §3.3 plus a function call, and it measures slower than §3.3: `Literal[1, 2, 3]` was 79 ns compiled against 71 composed. So `compiled_validator(t)` returns `validator(t)` outright in that case.
+
+Which means the honest statement of what this mechanism buys is narrower than the section implies: **it is worth having exactly where there is structure to unroll.** The published table (`benchmark/RESULTS.md`) says where that is, per type, and says `never` where it is not.
+
+#### One function, not a set of them
+
+An earlier draft expected *a set of flat functions calling one another*, one per recursion root, and noted that this would suit the persistent-cache work of §12, each function being separately a code object.
+
+It emits **one** function. Recursion never needs a second, because a back-edge stops unrolling and calls the composed validator instead of an emitted peer — which is simpler, and already correct. §12 should not assume the multi-function shape; if marshalling wants it, it must ask for it.
 
 ### 3.5 `inspect_type`
 

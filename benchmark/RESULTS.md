@@ -25,8 +25,9 @@ numbers from different machines must never be compared.
 
 - `—` — not measured. Nobody wrote a hand-written check
   for this case, which says nothing about the case.
-- `n/a` — the mechanism cannot validate this type at all.
-  v1 supports neither recursive aliases nor `Annotated`.
+- `n/a` — the mechanism cannot validate this type at all,
+  so there is nothing to measure. Every case marked so is a v1 one, and
+  every one is a PEP 695 alias, which v1 predates.
 - `never` — the analysis buys nothing here, so building a validator
   cannot repay. A fact, not a gap: it is what a plugin and a recursive
   alias both do, because each stops the unrolling.
@@ -40,25 +41,25 @@ What a user actually experiences.
 
 | Case                                | nodes | validate | validator | compiled_validator | hand-written |     v1 |
 |:------------------------------------|------:|---------:|----------:|-------------------:|-------------:|-------:|
-| int                                 |     1 |       49 |        46 |                 46 |           27 |    251 |
-| str                                 |     1 |       49 |        47 |                 46 |           28 |    255 |
-| list[int] x20                       |    21 |     1.5k |       540 |                287 |          284 |   5.4k |
-| list[int] x1000                     |  1001 |    58.1k |     21.4k |              13.5k |        12.4k | 240.6k |
-| list[str] x20                       |    21 |     1.4k |       520 |                277 |            — |   5.4k |
-| set[int] x20                        |    21 |     1.5k |       595 |                368 |            — |   5.6k |
-| nested list x100                    |   101 |    10.4k |      8.8k |               7.4k |            — |  59.4k |
-| dict[str, int] x20                  |    41 |     2.7k |      1.0k |                559 |          548 |  10.2k |
-| tuple[int, str]                     |     3 |      428 |       215 |                 80 |           64 |   1.2k |
-| tuple[int, ...] x20                 |    21 |     1.5k |       525 |                293 |            — |   5.4k |
-| int \| None (plain)                 |     1 |      180 |        49 |                 48 |           41 |    575 |
-| int \| str \| None (plain)          |     1 |      193 |        47 |                 49 |            — |    577 |
-| list[int] \| list[str] (structured) |    22 |     2.0k |       660 |                664 |            — |   5.8k |
-| Literal[1, 2, 3]                    |     1 |      382 |        70 |                 69 |            — |    946 |
-| TypedDict                           |     3 |      772 |       325 |                177 |            — |   7.4k |
-| NamedTuple                          |     3 |      393 |       161 |                 76 |            — |    494 |
-| shared subtype x20                  |   261 |    29.8k |     11.9k |               5.1k |            — |    n/a |
-| TypedDict x40 fields                |    41 |     5.1k |      2.9k |               1.8k |         1.4k |  48.9k |
-| recursive alias (JSON)              |     9 |     5.6k |      3.3k |               3.4k |            — |    n/a |
+| int                                 |     1 |       48 |        47 |                 46 |           28 |    255 |
+| str                                 |     1 |       48 |        46 |                 46 |           27 |    256 |
+| list[int] x20                       |    21 |     1.5k |       538 |                286 |          273 |   5.4k |
+| list[int] x1000                     |  1001 |    58.5k |     20.6k |              11.8k |        11.6k | 242.9k |
+| list[str] x20                       |    21 |     1.4k |       509 |                274 |            — |   5.5k |
+| set[int] x20                        |    21 |     1.5k |       588 |                330 |            — |   5.6k |
+| nested list x100                    |   101 |    10.6k |      8.1k |               7.2k |            — |  60.6k |
+| dict[str, int] x20                  |    41 |     2.7k |       967 |                540 |          546 |  10.2k |
+| tuple[int, str]                     |     3 |      413 |       215 |                 83 |           66 |   1.2k |
+| tuple[int, ...] x20                 |    21 |     1.5k |       518 |                305 |            — |   5.5k |
+| int \| None (plain)                 |     1 |      176 |        46 |                 48 |           43 |    581 |
+| int \| str \| None (plain)          |     1 |      190 |        46 |                 48 |            — |    586 |
+| list[int] \| list[str] (structured) |    22 |     2.0k |       661 |                654 |            — |   5.8k |
+| Literal[1, 2, 3]                    |     1 |      383 |        70 |                 70 |            — |    966 |
+| TypedDict                           |     3 |      769 |       321 |                178 |            — |   7.4k |
+| NamedTuple                          |     3 |      399 |       162 |                 74 |            — |    502 |
+| shared subtype x20                  |   261 |    30.2k |     11.8k |               5.1k |            — |    n/a |
+| TypedDict x40 fields                |    41 |     5.1k |      2.8k |               1.8k |         1.4k |  48.4k |
+| recursive alias (JSON)              |     9 |     5.4k |      3.3k |               3.3k |            — |    n/a |
 | NDArray[uint8] x20                  |     2 |     3.3k |      1.6k |               1.6k |            — |    n/a |
 | NDArray[uint8] x10000               |     2 |     3.3k |      1.6k |               1.6k |            — |    n/a |
 | ndarray[(int, int), uint8]          |     3 |     1.6k |      1.3k |               1.3k |            — |    n/a |
@@ -69,28 +70,28 @@ For comparing across shapes, which the per-call figure cannot do.
 
 | Case                                | nodes | validate | validator | compiled_validator | hand-written |     v1 |
 |:------------------------------------|------:|---------:|----------:|-------------------:|-------------:|-------:|
-| int                                 |     1 |     48.6 |      46.5 |               46.0 |         27.3 |  251.0 |
-| str                                 |     1 |     48.5 |      47.1 |               46.2 |         28.0 |  254.6 |
-| list[int] x20                       |    21 |     70.0 |      25.7 |               13.7 |         13.5 |  254.9 |
-| list[int] x1000                     |  1001 |     58.1 |      21.4 |               13.5 |         12.4 |  240.4 |
-| list[str] x20                       |    21 |     67.3 |      24.7 |               13.2 |            — |  256.3 |
-| set[int] x20                        |    21 |     70.4 |      28.3 |               17.5 |            — |  265.4 |
-| nested list x100                    |   101 |    103.4 |      86.6 |               73.7 |            — |  588.4 |
-| dict[str, int] x20                  |    41 |     65.7 |      24.4 |               13.6 |         13.4 |  248.9 |
-| tuple[int, str]                     |     3 |    142.6 |      71.6 |               26.8 |         21.4 |  393.2 |
-| tuple[int, ...] x20                 |    21 |     70.5 |      25.0 |               14.0 |            — |  259.4 |
-| int \| None (plain)                 |     1 |    180.3 |      49.2 |               48.3 |         40.5 |  575.2 |
-| int \| str \| None (plain)          |     1 |    193.2 |      47.1 |               48.5 |            — |  577.1 |
-| list[int] \| list[str] (structured) |    22 |     89.4 |      30.0 |               30.2 |            — |  261.6 |
-| Literal[1, 2, 3]                    |     1 |    382.0 |      70.1 |               69.5 |            — |  946.3 |
-| TypedDict                           |     3 |    257.2 |     108.2 |               59.1 |            — | 2461.0 |
-| NamedTuple                          |     3 |    131.0 |      53.5 |               25.3 |            — |  164.5 |
-| shared subtype x20                  |   261 |    114.3 |      45.4 |               19.4 |            — |    n/a |
-| TypedDict x40 fields                |    41 |    124.8 |      69.7 |               44.6 |         34.2 | 1192.7 |
-| recursive alias (JSON)              |     9 |    617.4 |     368.9 |              373.9 |            — |    n/a |
-| NDArray[uint8] x20                  |     2 |   1668.7 |     814.3 |              811.8 |            — |    n/a |
-| NDArray[uint8] x10000               |     2 |   1665.4 |     814.7 |              822.2 |            — |    n/a |
-| ndarray[(int, int), uint8]          |     3 |    519.7 |     431.8 |              429.9 |            — |    n/a |
+| int                                 |     1 |     48.4 |      47.0 |               46.4 |         27.7 |  255.2 |
+| str                                 |     1 |     47.7 |      46.0 |               46.0 |         27.4 |  255.7 |
+| list[int] x20                       |    21 |     69.2 |      25.6 |               13.6 |         13.0 |  258.8 |
+| list[int] x1000                     |  1001 |     58.4 |      20.5 |               11.8 |         11.6 |  242.6 |
+| list[str] x20                       |    21 |     67.1 |      24.2 |               13.0 |            — |  260.0 |
+| set[int] x20                        |    21 |     70.8 |      28.0 |               15.7 |            — |  267.1 |
+| nested list x100                    |   101 |    105.2 |      80.5 |               71.6 |            — |  599.9 |
+| dict[str, int] x20                  |    41 |     66.0 |      23.6 |               13.2 |         13.3 |  249.6 |
+| tuple[int, str]                     |     3 |    137.6 |      71.6 |               27.7 |         21.8 |  414.5 |
+| tuple[int, ...] x20                 |    21 |     70.2 |      24.7 |               14.5 |            — |  262.9 |
+| int \| None (plain)                 |     1 |    175.9 |      46.0 |               48.4 |         42.6 |  580.6 |
+| int \| str \| None (plain)          |     1 |    189.8 |      46.5 |               48.4 |            — |  585.8 |
+| list[int] \| list[str] (structured) |    22 |     92.1 |      30.0 |               29.7 |            — |  265.4 |
+| Literal[1, 2, 3]                    |     1 |    382.5 |      70.1 |               69.8 |            — |  965.6 |
+| TypedDict                           |     3 |    256.4 |     107.1 |               59.2 |            — | 2460.6 |
+| NamedTuple                          |     3 |    132.9 |      53.9 |               24.5 |            — |  167.4 |
+| shared subtype x20                  |   261 |    115.5 |      45.1 |               19.5 |            — |    n/a |
+| TypedDict x40 fields                |    41 |    124.1 |      68.4 |               42.8 |         34.3 | 1181.1 |
+| recursive alias (JSON)              |     9 |    604.9 |     361.1 |              365.0 |            — |    n/a |
+| NDArray[uint8] x20                  |     2 |   1647.2 |     800.2 |              806.2 |            — |    n/a |
+| NDArray[uint8] x10000               |     2 |   1641.8 |     793.3 |              802.2 |            — |    n/a |
+| ndarray[(int, int), uint8]          |     3 |    516.9 |     430.7 |              440.9 |            — |    n/a |
 
 ## Nanoseconds per call, invalid value
 
@@ -107,25 +108,25 @@ A hand-written check is absent here rather than fast: it returns
 |:------------------------------------|------:|---------:|----------:|-------------------:|-------------:|-------:|
 | int                                 |     1 |     1.2k |      1.2k |               1.2k |            — |   1.4k |
 | str                                 |     1 |     1.2k |      1.2k |               1.2k |            — |   1.4k |
-| list[int] x20                       |    21 |    17.1k |     17.4k |              16.8k |            — |   8.9k |
-| list[int] x1000                     |  1001 |   766.7k |    777.9k |             787.4k |            — | 247.5k |
-| list[str] x20                       |    21 |    17.0k |     17.0k |              16.7k |            — |   8.8k |
-| set[int] x20                        |    21 |    14.1k |     13.6k |              13.2k |            — |   7.5k |
-| nested list x100                    |   101 |   124.0k |    128.1k |             120.6k |            — | 29.65M |
-| dict[str, int] x20                  |    41 |    32.4k |     32.5k |              31.9k |            — |  13.9k |
-| tuple[int, str]                     |     3 |     3.9k |      3.8k |               3.6k |            — |   4.9k |
-| tuple[int, ...] x20                 |    21 |    17.7k |     17.6k |              17.3k |            — |   9.1k |
-| int \| None (plain)                 |     1 |     3.4k |      3.2k |               3.2k |            — |   6.9k |
-| int \| str \| None (plain)          |     1 |     4.4k |      4.2k |               4.2k |            — |   9.4k |
-| list[int] \| list[str] (structured) |    22 |    24.1k |     23.4k |              23.4k |            — |  20.1k |
+| list[int] x20                       |    21 |    17.1k |     17.2k |              16.9k |            — |   9.0k |
+| list[int] x1000                     |  1001 |   783.1k |    777.9k |             772.4k |            — | 249.2k |
+| list[str] x20                       |    21 |    16.8k |     16.8k |              16.7k |            — |   8.9k |
+| set[int] x20                        |    21 |    11.5k |     10.6k |              10.3k |            — |   6.2k |
+| nested list x100                    |   101 |   122.5k |    123.0k |             121.3k |            — | 29.74M |
+| dict[str, int] x20                  |    41 |    32.3k |     32.0k |              31.4k |            — |  14.0k |
+| tuple[int, str]                     |     3 |     4.0k |      3.8k |               3.7k |            — |   4.9k |
+| tuple[int, ...] x20                 |    21 |    17.8k |     17.7k |              17.4k |            — |   9.2k |
+| int \| None (plain)                 |     1 |     3.4k |      3.3k |               3.3k |            — |   6.8k |
+| int \| str \| None (plain)          |     1 |     4.4k |      4.2k |               4.3k |            — |   9.3k |
+| list[int] \| list[str] (structured) |    22 |    24.0k |     23.4k |              23.3k |            — |  20.0k |
 | Literal[1, 2, 3]                    |     1 |     2.0k |      1.6k |               1.6k |            — |   2.9k |
-| TypedDict                           |     3 |     2.0k |      1.6k |               1.5k |            — |   8.1k |
-| NamedTuple                          |     3 |     3.1k |      2.8k |               2.7k |            — |    565 |
-| shared subtype x20                  |   261 |   249.4k |    247.7k |             253.4k |            — |    n/a |
-| TypedDict x40 fields                |    41 |    37.6k |     36.5k |              36.3k |            — |  53.3k |
-| recursive alias (JSON)              |     9 |    31.1k |     29.6k |              29.8k |            — |    n/a |
-| NDArray[uint8] x20                  |     2 |     6.3k |      4.4k |               4.4k |            — |    n/a |
-| NDArray[uint8] x10000               |     2 |     6.4k |      4.4k |               4.4k |            — |    n/a |
+| TypedDict                           |     3 |     1.9k |      1.6k |               1.5k |            — |   8.1k |
+| NamedTuple                          |     3 |     3.1k |      2.8k |               2.7k |            — |    568 |
+| shared subtype x20                  |   261 |   250.4k |    242.6k |             251.9k |            — |    n/a |
+| TypedDict x40 fields                |    41 |    37.3k |     36.7k |              35.9k |            — |  53.6k |
+| recursive alias (JSON)              |     9 |    30.9k |     29.2k |              29.5k |            — |    n/a |
+| NDArray[uint8] x20                  |     2 |     6.2k |      4.4k |               4.3k |            — |    n/a |
+| NDArray[uint8] x10000               |     2 |     6.2k |      4.3k |               4.5k |            — |    n/a |
 | ndarray[(int, int), uint8]          |     3 |     4.1k |      3.8k |               3.8k |            — |    n/a |
 
 ## Nanoseconds to build
@@ -137,28 +138,28 @@ cost. Only two mechanisms build anything.
 
 | Case                                | validator | compiled_validator |
 |:------------------------------------|----------:|-------------------:|
-| int                                 |      1.6k |              15.3k |
+| int                                 |      1.6k |              15.2k |
 | str                                 |      1.6k |              15.1k |
-| list[int] x20                       |      3.2k |              26.2k |
-| list[int] x1000                     |      3.1k |              26.1k |
-| list[str] x20                       |      3.2k |              26.2k |
+| list[int] x20                       |      3.2k |              26.4k |
+| list[int] x1000                     |      3.1k |              26.2k |
+| list[str] x20                       |      3.1k |              26.5k |
 | set[int] x20                        |      3.2k |              26.0k |
-| nested list x100                    |    158.1k |              1.14M |
-| dict[str, int] x20                  |      4.7k |              36.6k |
+| nested list x100                    |    149.1k |              1.14M |
+| dict[str, int] x20                  |      4.7k |              36.1k |
 | tuple[int, str]                     |      4.9k |              37.8k |
-| tuple[int, ...] x20                 |      3.3k |              26.5k |
-| int \| None (plain)                 |      3.9k |              18.7k |
-| int \| str \| None (plain)          |      5.1k |              20.2k |
-| list[int] \| list[str] (structured) |      7.7k |              10.7k |
-| Literal[1, 2, 3]                    |      2.3k |               4.2k |
-| TypedDict                           |      6.1k |              50.8k |
-| NamedTuple                          |      4.7k |              31.4k |
-| shared subtype x20                  |     17.2k |             791.0k |
-| TypedDict x40 fields                |     32.4k |             615.2k |
-| recursive alias (JSON)              |     12.5k |              15.7k |
+| tuple[int, ...] x20                 |      3.4k |              26.7k |
+| int \| None (plain)                 |      3.9k |              18.6k |
+| int \| str \| None (plain)          |      5.2k |              20.6k |
+| list[int] \| list[str] (structured) |      7.7k |              10.6k |
+| Literal[1, 2, 3]                    |      2.3k |               4.4k |
+| TypedDict                           |      6.1k |              51.0k |
+| NamedTuple                          |      4.8k |              31.1k |
+| shared subtype x20                  |     17.3k |             793.9k |
+| TypedDict x40 fields                |     33.0k |             620.7k |
+| recursive alias (JSON)              |     12.3k |              14.4k |
 | NDArray[uint8] x20                  |      8.8k |              13.1k |
-| NDArray[uint8] x10000               |      8.8k |              13.2k |
-| ndarray[(int, int), uint8]          |      5.8k |               8.4k |
+| NDArray[uint8] x10000               |      8.7k |              13.0k |
+| ndarray[(int, int), uint8]          |      5.8k |               8.3k |
 
 ## Break-even: values before building has repaid itself
 
@@ -168,26 +169,26 @@ lookup.
 
 | Case                                | validator vs validate | compiled vs validate | compiled vs validator |
 |:------------------------------------|----------------------:|---------------------:|----------------------:|
-| int                                 |                   735 |                 5871 |                 36632 |
-| str                                 |                  1066 |                 6601 |                 18158 |
-| list[int] x20                       |                     3 |                   22 |                   104 |
+| int                                 |                  1072 |                 7284 |                 24369 |
+| str                                 |                   940 |                 9054 |                 never |
+| list[int] x20                       |                     3 |                   23 |                   105 |
 | list[int] x1000                     |                     0 |                    1 |                     3 |
-| list[str] x20                       |                     4 |                   23 |                   108 |
-| set[int] x20                        |                     4 |                   23 |                   114 |
-| nested list x100                    |                    93 |                  379 |                   871 |
-| dict[str, int] x20                  |                     3 |                   17 |                    83 |
-| tuple[int, str]                     |                    23 |                  109 |                   281 |
-| tuple[int, ...] x20                 |                     4 |                   22 |                   114 |
-| int \| None (plain)                 |                    30 |                  142 |                 22398 |
-| int \| str \| None (plain)          |                    35 |                  140 |                 never |
-| list[int] \| list[str] (structured) |                     6 |                    8 |                 never |
-| Literal[1, 2, 3]                    |                     7 |                   14 |                  6760 |
-| TypedDict                           |                    14 |                   85 |                   344 |
-| NamedTuple                          |                    20 |                   99 |                   372 |
-| shared subtype x20                  |                     1 |                   32 |                   116 |
-| TypedDict x40 fields                |                    14 |                  187 |                   597 |
+| list[str] x20                       |                     3 |                   23 |                   113 |
+| set[int] x20                        |                     4 |                   22 |                   101 |
+| nested list x100                    |                    60 |                  335 |                  1266 |
+| dict[str, int] x20                  |                     3 |                   17 |                    85 |
+| tuple[int, str]                     |                    25 |                  115 |                   287 |
+| tuple[int, ...] x20                 |                     4 |                   23 |                   125 |
+| int \| None (plain)                 |                    30 |                  146 |                 never |
+| int \| str \| None (plain)          |                    36 |                  146 |                 never |
+| list[int] \| list[str] (structured) |                     6 |                    8 |                  1647 |
+| Literal[1, 2, 3]                    |                     7 |                   14 |                 13860 |
+| TypedDict                           |                    14 |                   86 |                   355 |
+| NamedTuple                          |                    20 |                   96 |                   354 |
+| shared subtype x20                  |                     1 |                   32 |                   119 |
+| TypedDict x40 fields                |                    14 |                  186 |                   591 |
 | recursive alias (JSON)              |                     6 |                    7 |                 never |
-| NDArray[uint8] x20                  |                     5 |                    8 |                  2556 |
+| NDArray[uint8] x20                  |                     5 |                    8 |                 never |
 | NDArray[uint8] x10000               |                     5 |                    8 |                 never |
-| ndarray[(int, int), uint8]          |                    22 |                   31 |                  1419 |
+| ndarray[(int, int), uint8]          |                    23 |                   36 |                 never |
 
