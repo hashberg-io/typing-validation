@@ -760,3 +760,46 @@ No back-compatibility, ever, in this major version. §1 lists what that deletes;
 ### Zero runtime dependencies
 
 Part of the contract, not a preference — §8 shows what happens when a library at the bottom of the stack forgets it.
+
+## 14. Open questions
+
+### The `diagnose` message format
+
+**Deliberately unsettled, and owed a round of its own.**
+
+The nested failure messages are the library's most-loved feature, so the format deserves a decision rather than an inherited default. v1's explicit style is the starting point:
+
+```
+For type list[int], invalid value at idx: 2
+  For type <class 'int'>, invalid value: 'hi'
+```
+
+Alternatives should be judged as complete *families* — three or four of them, each covering a spread of cases in one sample (a plain mismatch, a failure at a collection index, a failure at a mapping key, a union with every member failing, a missing required `TypedDict` key, an unsupported type) — rather than as cherry-picked single examples, which flatter every format equally.
+
+The cost of settling this is low and the cost of relitigating it is high, because §3.6 puts the format in exactly one place. Decide once, before implementing `diagnose`.
+
+### Staleness detection for the persistent cache
+
+**The hardest problem left in the design, and the reason §12 puts marshalling last.**
+
+There is no answer yet — only the requirement that a stale entry must be *detected*, never trusted, because a silently-wrong cached validator is the worst failure this library could have. §13's "types are immutable once used" is the same question in an easier setting, and the two probably want one idea.
+
+### What ships as 2.0
+
+Stage 1 alone is a complete library carrying every breaking change, with stages 2 to 4 purely additive and semver-compatible in later releases. Shipping it as 2.0 gets the breaks in front of users once and early, and stops the unsolved marshalling problem from blocking anything.
+
+Against: `validator` and `compiled_validator` are the reason for the rewrite, and a 2.0 without them is a modernisation wearing a major version.
+
+### The inlining budget
+
+§3.4 needs a policy — unroll small nodes, call into large or heavily-shared ones — and the thresholds are currently guesses. This resolves during stage 3 on §11's evidence rather than by argument now, but it is the place the compiled path is most likely to be wrong.
+
+### The `TypeStructure` API
+
+§3.5 says `inspect_type` returns structured type information and says nothing about its shape. v1's `TypeInspector` exposed `recorded_type`, `type_structure`, `type_annotation` and `unsupported_types`, which is a reasonable starting set, but it was designed around the constraints of the recording hack that produced it. Worth designing from what callers need instead.
+
+### Smaller, deferred by agreement
+
+- **Plugin-contributed hint entries** (§7). Ours-alone is simpler; nothing forecloses opening it.
+- **The exact cache-management API** (§4.3). The shape is agreed — selective removal, full clear, scoped context manager — but not the spelling.
+- **The configuration surface** (§8). We know its shape and not yet its contents, because most of the switches will be discovered while implementing.
