@@ -33,14 +33,31 @@ from .nodes import TypeForm, TypeNode, node_for
 
 __all__ = ("compiled_validator",)
 
-_INLINE_BUDGET = 24
+_INLINE_BUDGET = 256
 """
-How many nodes an emitted function will unroll before it calls instead.
+How many checks an emitted function will unroll before it calls instead, counted
+with multiplicity.
 
-Unrolling works against sharing, which is what makes composition cheap: a node
-referenced twenty times unrolls twenty times, and a wide ``TypedDict`` explodes
-the body wherever it appears. So there is a threshold, and this is it — provisional
-until the benchmarks argue with it.
+Set from the benchmarks rather than from argument, and they argued with the
+question more than with the answer.
+
+The expectation was a trade: unrolling destroys the sharing that makes
+composition cheap, so somewhere there had to be a cliff. There is no cliff. Cost
+is **linear** in the emitted size — sixty wide dictionaries unroll to fourteen
+thousand lines and forty milliseconds — and unrolling *always* wins on speed,
+repaying its build cost within about one value for ``list[int]``, twenty-eight
+for ``dict[str, int]``, eighty-five for a twenty-fold shared sub-type, and four
+hundred and sixty-five for a forty-field ``TypedDict``. For a mechanism whose
+entire premise is very many values against a fixed type, every one of those is
+nothing.
+
+So the budget is generous, and its job is smaller than expected: it stops a
+monstrous type from spending tens of milliseconds in the compiler by surprise,
+and degrades it to the composed validator instead. It is a guard rail, not a
+tuning knob.
+
+It must be counted with multiplicity, which was the first version's real mistake.
+See :func:`_unrolled_size`.
 """
 
 
@@ -115,17 +132,31 @@ class _Emission:
         return name
 
 
-def _size(node: TypeNode, /) -> int:
-    """How many distinct nodes are reachable, which is what unrolling costs."""
-    seen: set[int] = set()
+def _unrolled_size(node: TypeNode, limit: int, /) -> int:
+    """
+    How many checks unrolling this node would emit, counted **with
+    multiplicity**.
+
+    Not the number of distinct nodes, which is the mistake this replaced. The
+    graph is a DAG over distinct sub-types — that is what makes composition cheap
+    — and unrolling flattens it back into a tree, so a sub-type mentioned twenty
+    times is emitted twenty times. Counting the DAG made every budget from 8 to
+    4096 produce byte-identical source, because a tuple of twenty identical
+    dictionaries has six distinct nodes and a hundred emitted ones.
+
+    Stops counting at ``limit``: the answer is only ever compared against the
+    budget, and a pathological type is exactly the one whose true size is not
+    worth computing.
+    """
+    total = 0
     stack = [node]
     while stack:
         current = stack.pop()
-        if id(current) in seen:
-            continue
-        seen.add(id(current))
+        total += 1
+        if total > limit:
+            return total
         stack.extend(current.children)
-    return len(seen)
+    return total
 
 
 def _cyclic(node: TypeNode, /) -> bool:
@@ -200,7 +231,7 @@ def _lines(
     Returns lines that ``return False`` on failure and fall through on success,
     which is what lets a caller concatenate them without threading a flag.
     """
-    if _cyclic(node) or _size(node) > budget:
+    if _cyclic(node) or _unrolled_size(node, budget) > budget:
         return _call_out(node, var, out)
     form = node.form
     t = node.t
