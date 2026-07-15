@@ -386,3 +386,85 @@ The two inline spellings do not even agree with each other: `list["JSON"]` store
 **`validation_aliases` is removed.** It existed to paper over exactly this case, and the reason it cannot survive is structural rather than aesthetic: the only way to resolve an inline reference is against the caller's frame, which §4.1 forbids outright — an interned node for `list["JSON"]` would mean different things depending on which caller built it first, making interning observable. It is also incoherent for `validator(t)`, which is called from somewhere entirely unrelated to where `t` was written.
 
 **PEP 695 absorbs the use case.** `type JSON = int | str | list[JSON]` is lazily evaluated, resolves against its defining module, needs no help from the caller, and is the recursion root the graph wants anyway (§4.2). The error message for an inline reference says so.
+
+## 7. Extension points
+
+### The hook already exists
+
+Extensibility needs no new machinery, because the dispatch point is already there: **the generic-class branch** — the arm reached when a parametrised type's origin is a plain class the core knows nothing about. It is precisely where the core has run out of things it can determine on its own, and precisely where v1 gave up, next to a `# TODO` proposing a dunder classmethod.
+
+**So the plugin mechanism and v1's TODO are the same feature.**
+
+It is also free. `int`, `list[int]`, `dict[str, int]`, unions and literals all resolve long before that arm, so nothing that is not *already* unknown pays anything for its existence.
+
+NumPy lands there naturally: `NDArray[np.uint8]` is `np.ndarray[tuple[Any, ...], np.dtype[np.uint8]]`, whose origin is `np.ndarray` — a plain class — so it falls through every other form and arrives exactly where the hook is.
+
+### Two flavours, both needed
+
+**`__validate__`, a dunder classmethod**, for classes you own. This is the ergonomic path for user code and the direct discharge of v1's TODO: a generic class declares how its own type arguments are validated.
+
+**A registry**, for classes you do not own. `np.ndarray` cannot be given a dunder by us, so third-party types will always need registration. Neither flavour subsumes the other.
+
+### What a plugin provides
+
+The required interface is deliberately minimal: **give me a boolean**. Asking every plugin author to emit source for §3.4 would be an absurd toll for supporting one type.
+
+Beyond that, a plugin may optionally supply:
+
+- **Structure** — its component types, so `inspect_type` can report them and totality (§2) can propagate through them. NumPy needs this: `NDArray[np.uint8 | np.float32]` has a union inside it that the core validates.
+- **Diagnostics** — so failures explain themselves in the plugin's own terms rather than generically.
+- **An emitter** — for a sophisticated plugin that wants to be inlined by §3.4.
+
+### Plugins are a de-optimisation boundary
+
+`compiled_validator` has no source for a plugin's check, so it can only emit a **call** into it. A plugin therefore costs one function call in the compiled path, and the unrolling stops at its edge.
+
+This is unavoidable — you cannot inline code you do not have — and it is worth stating plainly rather than discovering. A plugin that supplies an emitter escapes it; one that supplies only a boolean does not.
+
+### Plugins must be imported explicitly
+
+Without the import, a plugin's types raise `UnsupportedTypeError`, and the error names the import that would enable them.
+
+The tempting alternative — enable automatically when the underlying library happens to be importable — is **rejected on determinism grounds**. It would make the supported surface depend on transitive imports: `can_validate(NDArray[np.uint8])` would answer `True` in a process where some unrelated dependency imported numpy and `False` in one where it did not. A predicate that users branch on must not behave that way, and the failure would be maddening to diagnose precisely because nothing in the user's own code would have changed.
+
+It is worth noting the check is *self-gating* regardless: if numpy was never imported, `np.ndarray` does not exist as an object, so no type can hold it as an origin. A numpy type reaching `validate` is itself proof that numpy is imported. The explicit-import rule is therefore about determinism alone, not about avoiding an import cost.
+
+### The hint table
+
+To name the missing import, the error consults a small static table:
+
+```python
+{"numpy": "typing_validation.numpy"}
+```
+
+keyed by `t.__origin__.__module__.split(".")[0]`. That is a plain string comparison requiring no import at all.
+
+The table is **behaviour-neutral by construction** — it is consulted only when building an error message that is being raised anyway, so a stale or missing entry costs helpfulness, never correctness. It cannot make validation wrong.
+
+The table is ours for now. Letting plugins contribute entries is an obvious extension and deliberately deferred; ours-alone is simpler and nothing forecloses it.
+
+### The messages
+
+Every unregistered-generic error should teach, which v1's flat *"Unsupported validation for type X"* never did:
+
+```
+UnsupportedTypeError: Unsupported validation for type
+numpy.ndarray[tuple[Any, ...], numpy.dtype[numpy.uint8]].
+No validator is registered for generic class 'numpy.ndarray'.
+NumPy support is available but not enabled: use 'import typing_validation.numpy'.
+```
+
+```
+UnsupportedTypeError: Unsupported validation for type mylib.Matrix[int].
+No validator is registered for generic class 'mylib.Matrix'.
+Define a '__validate__' classmethod on the class, or register a validator
+via typing_validation.register_validator(mylib.Matrix, ...).
+```
+
+The generic form names both flavours, so the error always states how to fix itself.
+
+### NumPy is the first plugin
+
+`typing_validation.numpy` ships in this distribution and provides `NDArray[dtype]` and `ndarray[shape, dtype]`.
+
+Moving it out of the core is worth doing on its own merits — v1 put an `import numpy` probe in the middle of the dispatcher, which is an optional third-party dependency on the hot path, in a library that has no dependencies. But the stronger reason is that **it dogfoods the plugin API**. A plugin system whose author never uses it is always subtly wrong. NumPy is a punishing first client: dtype unions, shape tuples, parametrised origins like `np.number[Any]`. If the API can express NumPy, it can express what users will bring to it. Designing the API in a later release against imaginary clients would get it wrong, and by then numpy would be welded into the core and could only be extracted by a breaking change.
