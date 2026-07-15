@@ -19,7 +19,7 @@ import argparse
 import timeit
 from typing import Any, Callable
 
-from typing_validation import is_valid, validate
+from typing_validation import clear_cache, is_valid, validate, validator
 
 from .cases import Case, cases
 from .environment import describe, environment
@@ -43,6 +43,19 @@ def _swallow(fn: Callable[[], Any], /) -> None:
         fn()
     except Exception:
         pass
+
+
+def _build(t: Any, /) -> None:
+    """
+    Analyse a type from cold and compose a validator for it.
+
+    The cache is cleared first, or this would measure a dictionary lookup: the
+    second `validator(list[int])` in a process reuses the closure the first one
+    composed, which is the point of interning and the opposite of what the
+    construction cost means.
+    """
+    clear_cache()
+    validator(t)
 
 
 def _row(name: str, value: float | None, per_node: float | None = None) -> str:
@@ -97,6 +110,23 @@ def main() -> None:
             print(
                 f"    {'-> validate is':34} {ours / hand:>9.1f}x hand-written"
             )
+        built = _time(lambda: _build(case.t), max(20, n // 20))
+        check = validator(case.t)
+        theirs_ours = _time(lambda: check(case.valid), n)
+        print(_row("validator (valid)", theirs_ours, theirs_ours / case.nodes))
+        print(_row("validator (construction)", built))
+        # The only number that answers the question a user actually has — which
+        # of these should I use — and it turns the choice from folklore into a
+        # lookup. Arithmetic, given a construction cost and two per-call costs:
+        # the point where the cheaper call has repaid the analysis.
+        saved = ours - theirs_ours
+        if saved > 0:
+            print(
+                f"    {'-> validator repays after':34} "
+                f"{built / saved:>9.0f} values"
+            )
+        else:
+            print(f"    {'-> validator never repays here':34} {'':>9}")
         if v1 is not None and case.v1_comparable:
             try:
                 v1.validate(case.valid, case.t)

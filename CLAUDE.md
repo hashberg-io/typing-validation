@@ -34,7 +34,7 @@ Each gets a sub-branch off `main`, carries the tests that cover it, and is merge
 | # | Milestone | Branch | Contents | Status |
 |---|---|---|---|---|
 | 1 | The compositor | `validator` | `validator(t)`: a closure per node form, composed over the interned graph; late binding at back-edges; `UnsupportedTypeError` raised eagerly at construction. Added to `MECHANISMS`, so the whole corpus and the deep-value tests run through it | done |
-| 2 | Break-even | `validator-benchmarks` | §11's unanswered number: how many values must be validated before `validator(t)` overtakes `validate`. Construction cost, per-call cost, and the crossover | not started |
+| 2 | Break-even | `validator-benchmarks` | §11's unanswered number: how many values must be validated before `validator(t)` overtakes `validate`. Construction cost, per-call cost, and the crossover | done |
 | 3 | Release polish | `validator-docs` | README, guide, `DESIGN.md`, and the 2.1 release | not started |
 
 **The composition shape is settled by measurement, and it is not what §3.3 assumed.** Composing closures that call each other directly is 3× faster than `validate` per node — and raises `RecursionError` on exactly the deeply nested values `validate` handles, which would make the two mechanisms disagree. Composing closures that push onto a shared work stack is safe and only 1.16× faster, which does not earn a second mechanism at all.
