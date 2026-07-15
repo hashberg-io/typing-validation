@@ -46,6 +46,23 @@ This rule is the entire reason `can_validate` exists: it lets a caller ask, up f
 An unsupported component therefore poisons every type that contains it, transitively.
 `inspect_type` still reports the *whole* structure and marks precisely which component caused the poisoning, so "unsupported" is always actionable rather than opaque.
 
+#### When the error surfaces
+
+Totality says *which types are unsupported*. It does not say *when each mechanism notices*, and the mechanisms differ — necessarily.
+
+`validate` walks the value and the type together, and raises `UnsupportedTypeError` when it **reaches** an unsupported component. It does not scan the type first. Scanning would mean a full type walk on every call, including a cycle-detecting one for recursive aliases, which is exactly the per-call overhead the architecture exists to eliminate (`DESIGN.md` §3.1) and a guaranteed regression on the one benchmark that may never regress (§11).
+
+`validator(t)` and `compiled_validator(t)` cannot be lazy: they analyse the whole type before seeing any value, so they raise at construction, always.
+
+Two consequences, both intended:
+
+- A value that fails before reaching the unsupported component reports a plain failure. `validate(1, list["JSON"])` raises `ValidationError`, because `1` is not a list and no unsupported component was ever consulted.
+- A value that never needs the unsupported component **succeeds**. `validate([], list[Callable[[int], int]])` returns `True`, because the empty list imposes no obligation on the item type.
+
+Neither is a totality violation, because totality forbids *silently skipping an obligation* — and in both cases there was no obligation to skip. The type remains unsupported, and `can_validate` says so.
+
+**The conformance obligation between mechanisms is therefore over supported types**: for every `t` with `can_validate(t)`, all mechanisms agree on every value. Where `can_validate(t)` is false, `validate` may answer where the others raise, and a caller who needs the total answer asks for it by name.
+
 ### Purity
 
 **Validation never mutates or consumes the value it inspects.**
