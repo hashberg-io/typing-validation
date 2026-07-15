@@ -246,10 +246,19 @@ Generic aliases (`type Pair[T] = tuple[T, T]`) are supported through substitutio
 
 **Supported when annotation-derived**, otherwise **unsupported** · **changed**
 
-A forward reference is resolvable **iff it came from an annotation**, because that is what records the module to resolve against.
+A forward reference is resolvable **iff it came from an annotation**, because that is what identifies the class it belongs to — and the class is what identifies the module to resolve against.
 
-- A reference inside a class or `TypedDict` annotation carries its module (`ForwardRef('Later', module='mymod')`) and resolves against it.
-- A reference written inline in a call — `validate(x, list["JSON"])` — carries nothing. Note the two spellings even differ: `list["JSON"]` stores the bare string `'JSON'`, while `typing.List["JSON"]` stores a module-less `ForwardRef`. Neither can be resolved, and both are **unsupported**.
+The reference itself is not what carries that information, and usually does not carry it at all. Only a *top-level* `TypedDict` annotation records a module on its reference. A `NamedTuple` records none even at top level, and a reference nested inside a generic degrades to a bare string, which has nowhere to record one:
+
+| Written | Recorded as |
+|---|---|
+| `class TD(TypedDict): x: "Later"` | `ForwardRef('Later', module='mymod')` |
+| `class NT(NamedTuple): x: "Later"` | `ForwardRef('Later')` — no module |
+| `class TD(TypedDict): x: list["Later"]` | `list['Later']` — a bare string |
+
+**All three are supported**, because in all three the owning class is known, and resolution asks *it* for the module. That is uniform, and for the latter two it is the only thing that works.
+
+A reference written inline in a call — `validate(x, list["JSON"])` — has **no owner**, and is therefore **unsupported**. That, and not any property of the reference, is what makes it unresolvable: `list["JSON"]` written inline and `list["JSON"]` written as an annotation record the *identical* bare string, and only the second one can be resolved.
 
 v1 papered over the inline case with the `validation_aliases` context manager, which v2 **drops**. The replacement is a PEP 695 alias, and the error message says so.
 
