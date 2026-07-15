@@ -552,3 +552,63 @@ Neither of these is a break we chose; both are changes v1 documented as coming a
 **`UnsupportedTypeError` extends `NotImplementedError`.** v1 extended `ValueError` with the warning: *"Currently extends ValueError for backwards compatibility. This will be changed to NotImplementedError in v1.3.0."* `NotImplementedError` is the honest base: an unsupported type is not a bad value, it is a thing this library has not implemented.
 
 The distinction matters more than it looks. `UnsupportedTypeError` and `ValidationError` answer different questions — *"I cannot check this"* versus *"I checked this and it is wrong"* — and a caller must be able to tell them apart. Sharing a base with the validation error would blur exactly the line `can_validate` exists to draw.
+
+## 10. Testing and conformance
+
+### The stakes
+
+Several independent implementations of one specification are several places to drift, and **the drift is silent**. A `compiled_validator` that disagrees with `validate` on some corner returns a wrong answer with no exception and no symptom.
+
+So this suite is not test hygiene. It is the structural member that makes §3.1 stand up: the deliberate duplication is only safe because something continuously proves the implementations still agree. It is designed here, in this document, rather than bolted on afterwards.
+
+### Assert the failure is *our* failure
+
+**The most important rule, and the one v1 learned the hard way.**
+
+v1's sweep tested rejection like this:
+
+```python
+for t in [t for t in _all_types if t not in ts]:
+    try:
+        validate(val, t)
+        assert False, "shouldn't have been an instance"
+    except TypeError:
+        pass                      # <-- any TypeError counts as success
+```
+
+`_all_types` included `typing.NamedTuple`, which is not a runtime type, so `validate(val, typing.NamedTuple)` raised a raw `TypeError: isinstance() arg 2 must be a type…` from inside `isinstance`. The bare `except TypeError` read that as a correct rejection, and the test passed. **The bug and its camouflage shipped together, through eleven releases.**
+
+Hence the rule: a test asserts `ValidationError`, never `TypeError`, and never uses a bare `except`. A test that catches the base class cannot distinguish *"correctly rejected the value"* from *"the library crashed"*, which is precisely how that bug survived.
+
+This is why `ValidationError` is a distinct subclass (§5) rather than a plain `TypeError` with data smuggled onto it. The exception design and the test rule are the same decision seen from two sides: the type system of the errors is what makes the tests able to tell truth from accident.
+
+### Structure
+
+**A corpus module owns the cases.** v1 put its case tables in `test_00_validate.py` and had `test_01_can_validate.py` do `from .test_00_validate import _test_cases, …` — one test file reaching into another's privates, which is why the files are numbered at all. The numbering was load-bearing, and it still has a hole where `test_02` used to be. A `test/cases.py` owning the corpus makes the ordering irrelevant and the numbering unnecessary.
+
+The corpus is organised **per type form**, mirroring [TYPES.md](TYPES.md), so that a change to the catalogue has one obvious place to land. Each form contributes valid `(val, t)` pairs and invalid ones.
+
+**The mechanism axis.** The corpus is crossed with `[validate, validator, compiled_validator]`, so every case runs through every mechanism automatically:
+
+```python
+@pytest.mark.parametrize("mechanism", ALL_MECHANISMS)
+@pytest.mark.parametrize("val, t", VALID_CASES)
+```
+
+Drift then cannot land silently — it cannot land at all without turning something red. Adding a fourth mechanism later means adding one entry to a list, not writing a fourth suite.
+
+**The complement trick, kept.** v1's `test_invalid_cases` derived failures as *"every type in the universe not in this case's list must reject this value"*. That is a genuinely strong property from a small corpus, and it generalises across the mechanism axis for free. It is retained — with the `except TypeError` replaced by `pytest.raises(ValidationError)`, which is what would have caught the NamedTuple bug on the day it was written.
+
+### The obligation is smaller than it looks
+
+Because all mechanisms fail hard and delegate to one `diagnose` (§3.6), **there is exactly one implementation of error messages**. Conformance therefore only has to police the *boolean*. Message formatting is tested once, against `diagnose`, and no cross-mechanism agreement about text is required at all.
+
+### Differential testing
+
+The curated corpus proves the cases we thought of. Generated `(val, t)` pairs, checked for agreement across mechanisms, probe the ones we did not — which, given that the whole architecture rests on the mechanisms agreeing, is worth doing properly. The invariants are cheap to state: all mechanisms agree on the verdict; `can_validate` agrees with whether the validators raise `UnsupportedTypeError`; validation never mutates its input.
+
+That last one deserves a real test rather than a convention, since [purity](#2-validation-semantics) is assumed by three separate parts of this design.
+
+### Staging helps
+
+The implementation order in §12 means each mechanism is conformance-tested against a working predecessor: `validator` against `validate`, and `compiled_validator` against both. There is never a moment when two unproven implementations are being compared to each other.
