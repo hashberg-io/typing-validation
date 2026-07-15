@@ -16,12 +16,15 @@ is worse than not having it.
 """
 
 import argparse
+import pathlib
 import timeit
 from typing import Any, Callable
 
 from typing_validation import clear_cache, is_valid, validate, validator
 
 from .cases import Case, cases
+from .measure import measure
+from .table import render
 from .environment import describe, environment
 from .v1 import load_v1
 
@@ -67,6 +70,19 @@ def _row(name: str, value: float | None, per_node: float | None = None) -> str:
     return f"    {name:34} {cell}"
 
 
+def _write(args: argparse.Namespace, /) -> None:
+    """Measure everything and put the table where a reader will find it."""
+    v1 = load_v1()
+    selected = [c for c in cases() if args.filter in c.name]
+    results = []
+    for case in selected:
+        print(f"  measuring {case.name} ...")
+        results.append(measure(case, args.repeats, v1))
+    out = pathlib.Path(__file__).parent / "RESULTS.md"
+    out.write_text(render(results, environment()))
+    print(f"\nwrote {out}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -78,7 +94,15 @@ def main() -> None:
     parser.add_argument(
         "--filter", default="", help="only run cases whose name contains this"
     )
+    parser.add_argument(
+        "--write",
+        action="store_true",
+        help="write benchmark/RESULTS.md instead of printing",
+    )
     args = parser.parse_args()
+    if args.write:
+        _write(args)
+        return
     env = environment()
     print("Environment")
     print(describe(env))

@@ -26,12 +26,26 @@ do not have.
 from collections.abc import Callable, Collection, Mapping
 from typing import Any, Literal, Union, get_args, get_origin
 
-from .composition import Runner, Validator, runner_for
+from .composition import Runner, Validator, runner_for, validator
 from .diagnosis import diagnose
 from .errors import UnsupportedTypeError, ValidationError
 from .nodes import TypeForm, TypeNode, node_for
 
 __all__ = ("compiled_validator",)
+
+_MAX_NESTING = 16
+"""
+How deep the emitted code will nest before it calls instead.
+
+A second dimension the node budget cannot see, and a hard one: **CPython refuses
+more than 100 levels of indentation**, so a type a hundred containers deep — 101
+nodes, comfortably under the budget — unrolls into source that will not compile
+at all. The benchmark suite found that, by having such a case.
+
+Sixteen is far under the limit and far over anything real. Past it, the composed
+validator takes over, which costs nothing that matters: a type that deep spends
+its time descending rather than dispatching.
+"""
 
 _INLINE_BUDGET = 256
 """
@@ -85,6 +99,14 @@ def compiled_validator(t: Any, /) -> Validator:
     if not node.supported:
         culprits = node.unsupported_components()
         raise UnsupportedTypeError(t, culprits[0].reason if culprits else None)
+    if _is_pure_call_out(node):
+        # Nothing here to compile: the whole body would be one call into the
+        # composed validator, because the type is a cycle, a plugin, a literal, a
+        # structured union, or anything else with no source to unroll. So this
+        # *is* the composed validator, rather than the composed validator behind
+        # a function call — which is what it was, and which measured slower than
+        # asking for the composed validator directly.
+        return validator(t)
     check = _compile(node)
 
     def run(val: Any) -> Literal[True]:
@@ -204,6 +226,14 @@ def _compile(node: TypeNode, /) -> Runner:
     return namespace["_check"]  # type: ignore[no-any-return]
 
 
+def _is_pure_call_out(node: TypeNode, /) -> bool:
+    """Whether emitting this node would produce nothing but a call."""
+    probe = _Emission()
+    return _lines(
+        node, "_v", probe, depth=0, budget=_INLINE_BUDGET
+    ) == _call_out(node, "_v", _Emission())
+
+
 def _call_out(node: TypeNode, var: str, out: _Emission, /) -> list[str]:
     """
     Hand this node to the composed validator and be done with it.
@@ -231,7 +261,11 @@ def _lines(
     Returns lines that ``return False`` on failure and fall through on success,
     which is what lets a caller concatenate them without threading a flag.
     """
-    if _cyclic(node) or _unrolled_size(node, budget) > budget:
+    if (
+        depth >= _MAX_NESTING
+        or _cyclic(node)
+        or _unrolled_size(node, budget) > budget
+    ):
         return _call_out(node, var, out)
     form = node.form
     t = node.t
