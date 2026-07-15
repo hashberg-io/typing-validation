@@ -20,8 +20,8 @@ Keep them that way.
 |---|---|---|
 | **2.0** | `validate` and everything around it — the interpreter, node model, failure model, resolution, plugins | **released** (tag `v2.0.0`) |
 | **2.1** | `validator` — closure composition | **released** (tag `v2.1.0`) |
-| **2.2** | `compiled_validator` — codegen via `exec` | **implemented**, unreleased |
-| later | marshalling — persistent bytecode cache | blocked on an unsolved staleness problem (DESIGN.md §14) |
+| **2.2** | `compiled_validator` — codegen via `exec` | **released** (tag `v2.2.0`) |
+| next | marshalling — persistent bytecode cache | blocked on an unsolved staleness problem (DESIGN.md §14). Note that §12 assumed the compiled path emits *a set* of mutually-referencing functions, one per recursion root, each separately a code object — it emits **one**, and marshalling must not assume otherwise |
 
 Each stage manufactures the oracle for the next, so the order is not negotiable: `validator` is conformance-tested against `validate`, and `compiled_validator` against both.
 
