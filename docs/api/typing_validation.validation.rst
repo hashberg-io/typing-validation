@@ -3,27 +3,10 @@ typing_validation.validation
 
 .. automodule:: typing_validation.validation
 
-T
--
+TYPE_CHECKING
+-------------
 
-.. autodata:: typing_validation.validation.T
-
-UnsupportedTypeError
---------------------
-
-.. autoclass:: typing_validation.validation.UnsupportedTypeError
-    :show-inheritance:
-    :members:
-
-can_validate
-------------
-
-.. autofunction:: typing_validation.validation.can_validate
-
-inspect_type
-------------
-
-.. autofunction:: typing_validation.validation.inspect_type
+.. autodata:: typing_validation.validation.TYPE_CHECKING
 
 is_valid
 --------
@@ -44,8 +27,3 @@ validated_iter
 --------------
 
 .. autofunction:: typing_validation.validation.validated_iter
-
-validation_aliases
-------------------
-
-.. autofunction:: typing_validation.validation.validation_aliases

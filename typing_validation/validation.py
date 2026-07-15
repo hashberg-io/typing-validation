@@ -1,1043 +1,656 @@
+# SPDX-License-Identifier: LGPL-3.0-or-later
+
 """
-    Core type validation functionality.
+The interpreter: walking a value and a type together, once, and answering yes or
+no.
+
+This module stands alone, deliberately. It shares no implementation code with
+the node model or with any other mechanism, and it never consults their cache —
+not even for a hit, because a hit costs a hash of ``t`` and :mod:`typing`
+objects do not hash cheaply. The type-form structure is written out explicitly
+in the loop below, with no registry, no handler objects and no table dispatch,
+because each of those is paid *per node, per value, per call*, and on
+``validate(12, int)`` that overhead would be the entire cost of the operation.
+
+What it duplicates is semantics, not code. The catalogue in ``TYPES.md`` is what
+binds this module to the other mechanisms, and the conformance suite is what
+keeps them honest.
 """
 
-from __future__ import annotations
-
-from contextlib import contextmanager
-import collections
-import collections.abc as collections_abc
-from keyword import iskeyword
-import sys
-import typing
+from collections import defaultdict, deque
+from collections.abc import (
+    Buffer,
+    Callable,
+    Collection,
+    Container,
+    Iterable,
+    Iterator,
+    Mapping,
+    MutableMapping,
+    MutableSequence,
+    MutableSet,
+    Sequence,
+    Set,
+)
+from types import GenericAlias
 from typing import (
+    TYPE_CHECKING,
+    Annotated,
     Any,
-    ForwardRef,
-    Hashable,
-    Optional,
+    ByteString,
+    cast,
+    get_args,
+    get_origin,
+    is_protocol,
+    is_typeddict,
+    Literal,
+    NamedTuple,
+    NewType,
+    Tuple,
+    TypeAliasType,
     TypeVar,
     Union,
-    get_type_hints,
 )
+from annotationlib import ForwardRef
 
-from .validation_failure import (
-    InvalidNumpyDTypeValidationFailure,
-    SubtypeValidationFailure,
-    TypeVarBoundValidationFailure,
-    ValidationFailureAtIdx,
-    ValidationFailureAtKey,
-    MissingKeysValidationFailure,
-    UnionValidationFailure,
-    ValidationFailure,
-    _set_latest_validation_failure,
+from .diagnosis import diagnose
+from .errors import UnsupportedTypeError, ValidationError
+from .plugins import (
+    plugin_import,
+    registered_validator,
+    unsupported_explanation,
 )
-from .inspector import TypeInspector
+from ._resolution import resolve, strip_qualifiers
 
-if sys.version_info[1] >= 8:
-    from typing import Literal, Protocol
-else:
-    from typing_extensions import Literal, Protocol
+if TYPE_CHECKING:
+    # PEP 747. `type[T]` is what a validation library reaches for and is wrong:
+    # it rejects `validated(x, int | str)`, `Literal["a", "b"]` and `None` — the
+    # most ordinary things anyone validates against — because a union, a literal
+    # and None are type *forms* rather than classes. TypeForm[T] is the form of
+    # that distinction, and mypy already infers through it.
+    #
+    # The import is type-checking-only, so this stays a zero-dependency library:
+    # the name is never looked up at runtime, typeshed carries the stub so mypy
+    # needs nothing installed, and the docs read annotations as strings. The one
+    # cost is that get_type_hints on these functions raises NameError until
+    # typing.TypeForm lands, expected in 3.15.
+    from typing_extensions import TypeForm
 
-if sys.version_info[1] >= 9:
-    from keyword import issoftkeyword
-else:
+__all__ = ("is_valid", "validate", "validated", "validated_iter")
 
-    def issoftkeyword(s: str) -> bool:
-        r"""Dummy implementation for issoftkeyword in Python 3.7 and 3.8."""
-        return s == "_"
+_ITEM_ORIGINS = frozenset(
+    {
+        list,
+        set,
+        frozenset,
+        deque,
+        Collection,
+        Set,
+        MutableSet,
+        Sequence,
+        MutableSequence,
+    }
+)
+"""Origins whose every item is checked against a single type argument."""
 
+_MAPPING_ORIGINS = frozenset({dict, defaultdict, Mapping, MutableMapping})
+"""Origins whose every key and value is checked against a type argument each."""
 
-if sys.version_info[1] >= 10:
-    from types import NoneType, UnionType
-else:
-    NoneType = type(None)
-    UnionType = None
+_ITERATOR_ORIGINS = frozenset({Iterator})
+"""
+Origins that may be one-shot, and whose items therefore cannot be checked at all
+without consuming them.
+"""
 
+_MAYBE_ITEM_ORIGINS = frozenset({Iterable, Container})
+"""
+Origins whose items are checked only when the value is also a
+:class:`~collections.abc.Collection`, and so can be iterated without being
+consumed.
 
-try:
-    import typing_extensions
-except ModuleNotFoundError:
-    _typing_modules = [typing]
-else:
-    _typing_modules = [typing, typing_extensions]
+:class:`~collections.abc.Iterable` belongs here and **only** here. v1 listed it
+both here and in the iterator table, tested the iterator table first, and thereby
+made this arm unreachable — so ``[1, "a"]`` failed ``Collection[int]`` but passed
+``Iterable[int]`` for eleven releases. The origin tables are asserted disjoint by
+the test suite, which makes that bug unrepresentable rather than merely fixed.
+"""
 
+_UNSUPPORTED_ORIGINS: dict[Any, str] = {
+    Callable: (
+        "Callability is checkable; signatures are not, in general. Checking "
+        "only callable(val) while ignoring the signature would be a totality "
+        "violation dressed as support."
+    ),
+}
+"""
+Origins that are reached but deliberately refused, with the reason.
 
-_validation_aliases: typing.Dict[str, Any] = {}
-r"""
-    Current context of type aliases, used to resolve forward references to type aliases in :func:`validate`.
+Without this arm ``Callable[[int], int]`` would fall through to the
+generic-class arm and validate on ``isinstance(val, abc.Callable)``, which is
+the very half-support the form is refused for.
+"""
+
+_BYTESTRING_ORIGIN = get_origin(ByteString)
+"""
+What :obj:`typing.ByteString` unwraps to, which is the *deprecated*
+:class:`collections.abc.ByteString` rather than the
+:class:`~collections.abc.Buffer` it ought to mean.
+
+Following the origin would make this library emit
+:class:`DeprecationWarning`\\ s on its users' behalf and break outright in 3.17,
+so the form is mapped to :class:`~collections.abc.Buffer` instead.
 """
 
 
-@contextmanager
-def validation_aliases(**aliases: Any) -> collections.abc.Iterator[None]:
-    r"""
-    Sets type aliases that can be used to resolve forward references in :func:`validate`.
-
-    For example, the following snippet validates a value against a recursive type alias for JSON-like objects, using :func:`validation_aliases` to create a
-    context where :func:`validate` internally evaluates the forward reference ``"JSON"`` to the type alias ``JSON``:
-
-    >>> JSON = Union[int, float, bool, None, str, list["JSON"], dict[str, "JSON"]]
-    >>> with validation_aliases(JSON=JSON):
-    >>>     validate([1, 2.2, {"a": ["Hello", None, {"b": True}]}], list["JSON"])
-
+def validate(val: Any, t: Any, /) -> Literal[True]:
     """
-    # pylint: disable = global-statement
-    global _validation_aliases
-    outer_validation_aliases = _validation_aliases
-    _validation_aliases = {**_validation_aliases}
-    _validation_aliases.update(aliases)
-    try:
-        yield
-    finally:
-        _validation_aliases = outer_validation_aliases
+    Validate a value against a type, raising if it does not conform.
 
+    Returns :obj:`True` so that validation can be gated behind an assertion and
+    compiled out entirely under ``-O``::
 
-def _get_type_classes(name: str) -> typing.List[typing.Type[Any]]:
-    """Get the classes for the specified type from typing and its possible backport modules."""
-    return [
-        getattr(module, name) for module in _typing_modules if hasattr(module, name)
-    ]
+        assert validate(val, t)
 
-
-# basic types
-_basic_types = frozenset(
-    {bool, int, float, complex, bytes, bytearray, memoryview, str, range, slice}
-)
-
-# collection types (parametric on item type)
-_collection_pseudotypes_dict = {
-    typing.Collection: collections_abc.Collection,
-    typing.AbstractSet: collections_abc.Set,
-    typing.MutableSet: collections_abc.MutableSet,
-    typing.Sequence: collections_abc.Sequence,
-    typing.MutableSequence: collections_abc.MutableSequence,
-    typing.Deque: collections.deque,
-    typing.List: list,
-    typing.Set: set,
-    typing.FrozenSet: frozenset,
-}
-_collection_pseudotypes = frozenset(_collection_pseudotypes_dict.keys()) | frozenset(
-    _collection_pseudotypes_dict.values()
-)
-_collection_origins = frozenset(_collection_pseudotypes_dict.values())
-
-# ordered collection types (parametric on item type)
-_ordered_collection_pseudotypes_dict = {
-    typing.Sequence: collections_abc.Sequence,
-    typing.MutableSequence: collections_abc.MutableSequence,
-    typing.Deque: collections.deque,
-    typing.List: list,
-}
-_ordered_collection_pseudotypes = frozenset(
-    _ordered_collection_pseudotypes_dict.keys()
-) | frozenset(_ordered_collection_pseudotypes_dict.values())
-_ordered_collection_origins = frozenset(_ordered_collection_pseudotypes_dict.values())
-
-# types that might be validated as collections (parametric on item type)
-_maybe_collection_pseudotypes_dict = {
-    typing.Iterable: collections_abc.Iterable,
-    typing.Container: collections_abc.Container,
-}
-_maybe_collection_pseudotypes = frozenset(
-    _maybe_collection_pseudotypes_dict.keys()
-) | frozenset(_maybe_collection_pseudotypes_dict.values())
-_maybe_collection_origins = frozenset(_maybe_collection_pseudotypes_dict.values())
-
-# mapping types (parametric on both key type and value type)
-_mapping_pseudotypes_dict = {
-    typing.Mapping: collections_abc.Mapping,
-    typing.MutableMapping: collections_abc.MutableMapping,
-    typing.Dict: dict,
-    typing.DefaultDict: collections.defaultdict,
-}
-_mapping_pseudotypes = frozenset(_mapping_pseudotypes_dict.keys()) | frozenset(
-    _mapping_pseudotypes_dict.values()
-)
-_mapping_origins = frozenset(_mapping_pseudotypes_dict.values())
-
-# tuple and namedtuples
-_tuple_pseudotypes = frozenset(
-    {typing.Tuple, tuple, typing.NamedTuple, collections.namedtuple}
-)
-_tuple_origins = frozenset({tuple, collections.namedtuple})
-
-# other types
-_other_pseudotypes_dict = {
-    typing.Iterator: collections_abc.Iterator,
-    typing.Hashable: collections_abc.Hashable,
-    typing.Sized: collections_abc.Sized,
-}
-if sys.version_info[1] <= 11:
-    _other_pseudotypes_dict[typing.ByteString] = collections_abc.ByteString  # type: ignore
-else:
-    from collections.abc import Buffer as _collections_abc_Buffer
-
-    _other_pseudotypes_dict[_collections_abc_Buffer] = _collections_abc_Buffer
-
-_other_pseudotypes = frozenset(_other_pseudotypes_dict.keys()) | frozenset(
-    _other_pseudotypes_dict.values()
-)
-_other_origins = frozenset(_other_pseudotypes_dict.values())
-
-_iterator_origins = frozenset(
-    [
-        typing.Iterator,
-        collections_abc.Iterator,
-        typing.Iterable,
-        collections_abc.Iterable,
-    ]
-)
-
-# all types together
-_pseudotypes_dict: typing.Mapping[Any, Any] = {
-    **_collection_pseudotypes_dict,
-    **_maybe_collection_pseudotypes_dict,
-    **_mapping_pseudotypes_dict,
-    **_other_pseudotypes_dict,
-}  # used by tests
-_pseudotypes = (
-    _collection_pseudotypes
-    | _maybe_collection_pseudotypes
-    | _mapping_pseudotypes
-    | _tuple_pseudotypes
-    | _other_pseudotypes
-)
-_origins = (
-    _collection_origins
-    | _maybe_collection_origins
-    | _mapping_origins
-    | _tuple_origins
-    | _other_origins
-)
-
-
-class UnsupportedTypeError(ValueError):
+    :raises ValidationError: if the value is not valid for the type.
+    :raises UnsupportedTypeError: if the type, or any component of it, is not
+        one this library can validate against.
     """
-    Class for errors raised when attempting to validate an unsupported type.
-
-    .. warning::
-
-        Currently extends :obj:`ValueError` for backwards compatibility.
-        This will be changed to :obj:`NotImplementedError` in v1.3.0.
-    """
-
-
-def _unsupported_type_error(
-    t: Any, explanation: Union[str, None] = None
-) -> UnsupportedTypeError:
-    """
-    Error for unsupported types, with optional explanation.
-    """
-    msg = f"Unsupported validation for type {t!r}."
-    if explanation is not None:
-        msg += " " + explanation
-    return UnsupportedTypeError(msg)
-
-
-def _type_error(
-    val: Any, t: Any, *errors: TypeError, is_union: bool = False
-) -> TypeError:
-    """
-    Type error arising from ``val`` not being an instance of type ``t``.
-
-    If other type errors are passed as causes, their error messages are indented and included.
-    A :func:`validation_failure` attribute of type ValidationFailure is set for the error,
-    including full information about the chain of validation failures.
-    """
-    causes: typing.Tuple[ValidationFailure, ...] = tuple(
-        getattr(error, "validation_failure")
-        for error in errors
-        if hasattr(error, "validation_failure")
-    )
-    assert all(isinstance(cause, ValidationFailure) for cause in causes)
-    validation_failure: ValidationFailure
-    if is_union:
-        validation_failure = UnionValidationFailure(
-            val, t, *causes, type_aliases=_validation_aliases
-        )
-    else:
-        validation_failure = ValidationFailure(
-            val, t, *causes, type_aliases=_validation_aliases
-        )
-    error = TypeError(str(validation_failure))
-    setattr(error, "validation_failure", validation_failure)
-    return error
-
-
-def _typevar_error(val: Any, t: Any, bound_error: TypeError) -> TypeError:
-    assert hasattr(bound_error, "validation_failure"), bound_error
-    cause = getattr(bound_error, "validation_failure")
-    assert isinstance(cause, ValidationFailure), cause
-    validation_failure = TypeVarBoundValidationFailure(val, t, cause)
-    error = TypeError(str(validation_failure))
-    setattr(error, "validation_failure", validation_failure)
-    return error
-
-
-def _idx_type_error(
-    val: Any, t: Any, idx_error: TypeError, *, idx: int, ordered: bool
-) -> TypeError:
-    assert hasattr(idx_error, "validation_failure"), idx_error
-    idx_cause = getattr(idx_error, "validation_failure")
-    assert isinstance(idx_cause, ValidationFailure), idx_cause
-    validation_failure = ValidationFailureAtIdx(
-        val, t, idx_cause, idx=idx, ordered=ordered
-    )
-    error = TypeError(str(validation_failure))
-    setattr(error, "validation_failure", validation_failure)
-    return error
-
-
-def _key_type_error(val: Any, t: Any, key_error: TypeError, *, key: Any) -> TypeError:
-    assert hasattr(key_error, "validation_failure"), key_error
-    key_cause = getattr(key_error, "validation_failure")
-    assert isinstance(key_cause, ValidationFailure), key_cause
-    validation_failure = ValidationFailureAtKey(val, t, key_cause, key=key)
-    error = TypeError(str(validation_failure))
-    setattr(error, "validation_failure", validation_failure)
-    return error
-
-
-def _missing_keys_type_error(val: Any, t: Any, *missing_keys: Any) -> TypeError:
-    validation_failure = MissingKeysValidationFailure(val, t, missing_keys)
-    error = TypeError(str(validation_failure))
-    setattr(error, "validation_failure", validation_failure)
-    return error
-
-
-def _subtype_error(s: Any, t: Any) -> TypeError:
-    validation_failure = SubtypeValidationFailure(s, t)
-    error = TypeError(str(validation_failure))
-    setattr(error, "validation_failure", validation_failure)
-    return error
-
-
-def _type_alias_error(t_alias: str, cause: TypeError) -> TypeError:
-    """
-    Repackages a validation error as a type alias error.
-    """
-    assert hasattr(cause, "validation_failure"), cause
-    validation_failure = getattr(cause, "validation_failure")
-    assert isinstance(validation_failure, ValidationFailure), validation_failure
-    validation_failure._t = t_alias
-    return cause
-
-
-def _numpy_dtype_error(val: Any, t: Any) -> TypeError:
-    """
-    Type error arising from ``val`` not being an instance of NumPy array
-    type ``t``, because ``val.dtype`` is not valid.
-    """
-    validation_failure = InvalidNumpyDTypeValidationFailure(val, t)
-    error = TypeError(str(validation_failure))
-    setattr(error, "validation_failure", validation_failure)
-    return error
-
-
-# def _missing_args_msg(t: Any) -> str:
-#     """Error message for missing :attr:`__args__` attribute on a type ``t``."""
-#     return f"For type {repr(t)}, expected '__args__' attribute."  # pragma: nocover
-
-
-# def _wrong_args_num_msg(t: Any, num_args: int) -> str:
-#     """Error message for incorrect number of :attr:`__args__` on a type ``t``."""
-#     return f"For type {repr(t)}, expected '__args__' to be tuple with {num_args} elements."  # pragma: nocover
-
-
-def _validate_type(val: Any, t: type) -> None:
-    """Basic validation using :func:`isinstance`"""
-    if isinstance(val, TypeInspector):
-        val._record_type(t)
-        return
-    if not isinstance(val, t):
-        raise _type_error(val, t)
-
-
-def _validate_collection(val: Any, t: Any, ordered: bool) -> None:
-    """Parametric collection validation (i.e. recursive validation of all items)."""
-    # assert hasattr(t, "__args__"), _missing_args_msg(t)
-    t__args__ = t.__args__
-    # assert isinstance(t__args__, tuple) and len(t__args__) == 1, _wrong_args_num_msg(
-    #     t, 1
-    # )
-    item_t = t__args__[0]
-    if isinstance(val, TypeInspector):
-        val._record_collection(item_t)
-        validate(val, item_t)
-        return
-    for idx, item in enumerate(val):
-        try:
-            validate(item, item_t)
-        except TypeError as e:
-            raise _idx_type_error(val, t, e, idx=idx, ordered=ordered) from None
-
-
-def _validate_mapping(val: Any, t: Any) -> None:
-    """Parametric mapping validation (i.e. recursive validation of all keys and values)."""
-    # assert hasattr(t, "__args__"), _missing_args_msg(t)
-    t__args__ = t.__args__
-    # assert isinstance(t__args__, tuple) and len(t__args__) == 2, _wrong_args_num_msg(
-    #     t, 2
-    # )
-    key_t, value_t = t__args__
-    if isinstance(val, TypeInspector):
-        val._record_mapping(key_t, value_t)
-        validate(val, key_t)
-        validate(val, value_t)
-        return
-    for key, value in val.items():
-        try:
-            validate(key, key_t)
-        except TypeError as e:
-            raise _type_error(val, t, e) from None
-        try:
-            validate(value, value_t)
-        except TypeError as e:
-            raise _key_type_error(val, t, e, key=key) from None
-
-
-def _validate_tuple(val: Any, t: Any) -> None:
-    """
-    Parametric tuple validation (i.e. recursive validation of all items).
-    Two cases:
-
-    - variadic tuple types: arbitrary number of items, all of same type
-    - fixed-length tuple types: fixed number of items, each with its individual type
-    """
-    # assert hasattr(t, "__args__"), _missing_args_msg(t)
-    t__args__ = t.__args__
-    # assert isinstance(
-    #     t__args__, tuple
-    # ), f"For type {repr(t)}, expected '__args__' to be a tuple."
-    if ... in t__args__:  # variadic tuple
-        # assert len(t__args__) == 2, _wrong_args_num_msg(t, 2)
-        item_t = t__args__[0]
-        if isinstance(val, TypeInspector):
-            val._record_variadic_tuple(item_t)
-            validate(val, item_t)
-            return
-        for idx, item in enumerate(val):
-            try:
-                validate(item, item_t)
-            except TypeError as e:
-                raise _idx_type_error(val, t, e, idx=idx, ordered=True) from None
-    else:  # fixed-length tuple
-        if isinstance(val, TypeInspector):
-            val._record_fixed_tuple(*t__args__)
-            for item_t in t__args__:
-                validate(val, item_t)
-            return
-        if len(val) != len(t__args__):
-            raise _type_error(val, t)
-        for idx, (item_t, item) in enumerate(zip(t__args__, val)):
-            try:
-                validate(item, item_t)
-            except TypeError as e:
-                raise _idx_type_error(val, t, e, idx=idx, ordered=True) from None
-
-
-def _validate_union(val: Any, t: Any, *, use_UnionType: bool = False) -> None:
-    """
-    Union type validation. Each type ``u`` listed in the union type ``t`` is checked:
-
-    - if ``val`` is an instance of ``t``, returns immediately without error
-    - otherwise, moves to the next ``u``
-
-    If ``val`` is not an instance of any of the types listed in the union, type error is raised.
-    """
-    # assert hasattr(t, "__args__"), _missing_args_msg(t)
-    t__args__ = t.__args__
-    # assert isinstance(
-    #     t__args__, tuple
-    # ), f"For type {repr(t)}, expected '__args__' to be a tuple."
-    if isinstance(val, TypeInspector):
-        val._record_union(*t__args__, use_UnionType=use_UnionType)
-        for member_t in t__args__:
-            validate(val, member_t)
-        return
-    if not t__args__:
-        return
-    member_errors: typing.List[TypeError] = []
-    for member_t in t__args__:
-        try:
-            validate(val, member_t)
-            return
-        except TypeError as e:
-            member_errors.append(e)
-    raise _type_error(val, t, *member_errors, is_union=True)
-
-
-def _validate_literal(val: Any, t: Any) -> None:
-    """
-    Literal type validation.
-    """
-    # assert hasattr(t, "__args__"), _missing_args_msg(t)
-    t__args__ = t.__args__
-    # assert isinstance(
-    #     t__args__, tuple
-    # ), f"For type {repr(t)}, expected '__args__' to be a tuple."
-    if isinstance(val, TypeInspector):
-        val._record_literal(*t__args__)
-        return
-    if val not in t__args__:
-        raise _type_error(val, t)
-
-
-def _validate_alias(val: Any, t_alias: str) -> None:
-    r"""
-    Validation of type aliases within the context provided by :func:`validation`
-    """
-    t = _validation_aliases[t_alias]
-    if isinstance(val, TypeInspector):
-        val._record_alias(t_alias)
-        return
-    nested_error: Optional[TypeError] = None
-    try:
-        validate(val, t)
-    except TypeError as e:
-        nested_error = e
-    if nested_error is not None:
-        raise _type_alias_error(t_alias, nested_error)
-
-
-def _is_typed_dict(t: type) -> bool:
-    """
-    Determines whether a type is a subclass of :class:`TypedDict`.
-    """
-    return t.__class__ in _get_type_classes("_TypedDictMeta")
-
-
-def _validate_typed_dict(val: Any, t: type) -> None:
-    """
-    Validation of :class:`TypedDict` subclasses.
-    """
-    annotations = get_type_hints(t)
-    required_keys: frozenset[str] = getattr(t, "__required_keys__")
-    if isinstance(val, TypeInspector):
-        val._record_typed_dict(t)
-        for k, val_t in annotations.items():
-            validate(val, val_t)
-        return
-    # 1. Validate that `val`` is a mapping with string keys:
-    try:
-        validate(val, typing.Mapping[str, typing.Any])
-    except TypeError as e:
-        raise _type_error(val, t, e) from None
-    # 2. Validate presence of required keys:
-    missing_keys = [k for k in required_keys if k not in val]
-    if missing_keys:
-        raise _missing_keys_type_error(val, t, *missing_keys)
-    # 3. Validate value types:
-    for k, v in annotations.items():
-        if k in val:
-            try:
-                validate(val[k], v)
-            except TypeError as e:
-                raise _key_type_error(val, t, e, key=k) from None
-
-
-def _validate_user_class(val: Any, t: Any) -> None:
-    # assert hasattr(t, "__args__"), _missing_args_msg(t)
-    t__args__ = t.__args__
-    t__origin__ = t.__origin__
-    # assert isinstance(
-    #     t__args__, tuple
-    # ), f"For type {repr(t)}, expected '__args__' to be a tuple."
-    if isinstance(val, TypeInspector):
-        if t__origin__ is type:
-            if len(t__args__) != 1 or not _can_validate_subtype_of(t__args__[0]):
-                val._record_unsupported_type(t)
-                return
-        val._record_pending_type_generic(t__origin__)
-        val._record_user_class(*t__args__)
-        for arg in t__args__:
-            validate(val, arg)
-        return
-    _validate_type(val, t__origin__)
-    if t__origin__ is type:
-        if len(t__args__) != 1:
-            raise _unsupported_type_error(t)
-        _validate_subtype_of(val, t__args__[0])
-        return
-    # TODO: Generic type arguments cannot be validated in general,
-    #       but in a future release it will be possible for classes to define
-    #       a dunder classmethod which can be used to validate type arguments.
-
-
-def __extract_member_types(u: Any) -> tuple[Any, ...] | None:
-    q = collections.deque([u])
-    member_types: list[Any] = []
-    while q:
-        t = q.popleft()
-        if t is Any:
-            return None
-        elif UnionType is not None and isinstance(t, UnionType):
-            q.extend(t.__args__)
-        elif hasattr(t, "__origin__") and t.__origin__ is Union:
-            q.extend(t.__args__)
-        else:
-            member_types.append(t)
-    return tuple(member_types)
-
-
-def __check_can_validate_subtypes(*subtypes: Any) -> None:
-    for s in subtypes:
-        if not isinstance(s, type):
-            raise ValueError(
-                "validate(s, Type[t]) is only supported when 's' is "
-                "an instance of 'type' or a union of instances of 'type'.\n"
-                f"Found s = {'|'.join(str(s) for s in subtypes)}"
-            )
-
-
-def __check_can_validate_supertypes(*supertypes: Any) -> None:
-    for t in supertypes:
-        if not isinstance(t, type):
-            raise ValueError(
-                "validate(s, Type[t]) is only supported when 't' is "
-                "an instance of 'type' or a union of instances of 'type'.\n"
-                f"Found t = {'|'.join(str(t) for t in supertypes)}"
-            )
-
-
-def _can_validate_subtype_of(t: Any) -> bool:
-    try:
-        # This is the validation part of _validate_subtype:
-        t_member_types = __extract_member_types(t)
-        if t_member_types is not None:
-            __check_can_validate_supertypes(*t_member_types)
+    # The scalar fast path, measured rather than assumed. A plain class that is
+    # not a named tuple is decided by one isinstance, and going through the work
+    # stack to reach that isinstance costs two Python calls, two list
+    # allocations and a tuple allocation — 134ns against 46ns, on a hand-written
+    # baseline of 31ns. On validate(12, int) the machinery *is* the cost, which
+    # is the whole reason this mechanism stands alone. The tuple test is what
+    # excludes named tuples, whose fields still need checking.
+    if type(t) is type and not issubclass(t, tuple):
+        if isinstance(val, t):
+            return True
+    elif _check(val, t):
         return True
-    except ValueError:
-        return False
+    raise ValidationError(val, t, diagnose(val, t))
 
 
-def _validate_subtype_of(s: Any, t: Any) -> None:
-    # 1. Validation:
-    __check_can_validate_subtypes(s)
-    t_member_types = __extract_member_types(t)
-    if t_member_types is None:
-        # An Any was found amongst the member types, all good.
-        return
-    __check_can_validate_supertypes(*t_member_types)
-    # 2. Subtype check:
-    if not issubclass(s, t_member_types):
-        raise _subtype_error(s, t)
-    # TODO: improve support for subtype checks.
+def is_valid(val: Any, t: Any, /) -> bool:
+    """
+    Whether a value is valid for a type.
+
+    This does **not** build an explanation, because a caller who wanted one
+    would have called :func:`validate` and caught the exception. Asking for a
+    boolean gets you a boolean at boolean prices.
+
+    :raises UnsupportedTypeError: if the type, or any component of it, is not
+        one this library can validate against. An unsupported type is not an
+        invalid value, and is not reported as :obj:`False`.
+    """
+    # The same fast path as validate, for the same measured reason.
+    if type(t) is type and not issubclass(t, tuple):
+        return isinstance(val, t)
+    return _check(val, t)
 
 
-def _extract_dtypes(t: Any) -> typing.Sequence[Any]:
-    if t is Any:
-        return [Any]
+def validated[T](val: Any, t: TypeForm[T], /) -> T:
+    """
+    Validate a value against a type and return it, for use in an expression.
+
+    :raises ValidationError: if the value is not valid for the type.
+    """
+    if _check(val, t):
+        return cast(T, val)
+    raise ValidationError(val, t, diagnose(val, t))
+
+
+def validated_iter[T](val: Iterable[T], t: Any, /) -> Iterable[T]:
+    """
+    Validate an iterable's items against a type as they are yielded.
+
+    This is the only honest way to validate an :class:`~typing.Iterator`.
+    Determining the items of a one-shot iterator consumes it, so validating them
+    eagerly would leave the caller holding an exhausted object — which is why
+    ``Iterator[T]`` leaves its item type unchecked. Checking each item on its way
+    past costs the caller nothing they were not already paying.
+
+    :raises ValidationError: if the value is not an instance of the type's
+        origin, or — when an invalid item is reached, at the point it is
+        reached.
+    :raises UnsupportedTypeError: if the type is not a parametrised iterable.
+    """
+    origin = get_origin(t)
     if (
-        UnionType is not None
-        and isinstance(t, UnionType)
-        or hasattr(t, "__origin__")
-        and t.__origin__ is Union
+        origin not in _ITEM_ORIGINS
+        and origin not in _ITERATOR_ORIGINS
+        and origin not in _MAYBE_ITEM_ORIGINS
     ):
-        return [dtype for member in t.__args__ for dtype in _extract_dtypes(member)]
-    import numpy as np  # pylint: disable = import-outside-toplevel
-
-    if hasattr(t, "__origin__"):
-        t__origin__ = t.__origin__
-        if t__origin__ in {
-            np.number,
-            np.inexact,
-            np.floating,
-            np.complexfloating,
-            np.integer,
-            np.signedinteger,
-            np.unsignedinteger,
-        }:
-            if t == t__origin__[Any]:
-                return [t__origin__]
-            # TODO: add broader support for np.NBitBase subtypes
-    if isinstance(t, type) and issubclass(t, np.generic):
-        return [t]
-    raise TypeError()
+        raise UnsupportedTypeError(
+            t,
+            "validated_iter needs a parametrised iterable type, such as "
+            "Iterator[int].",
+        )
+    if not isinstance(val, origin):
+        raise ValidationError(val, t)
+    args = get_args(t)
+    if not args:
+        return cast(Iterable[T], val)
+    return _validated_iter(val, args[0])
 
 
-def _validate_numpy_array(val: Any, t: Any) -> None:
-    import numpy as np  # pylint: disable = import-outside-toplevel
-
-    if not isinstance(val, TypeInspector):
-        _validate_type(val, np.ndarray)
-    # assert hasattr(t, "__args__"), _missing_args_msg(t)
-    t__args__ = t.__args__
-    # assert len(t.__args__) == 2, _wrong_args_num_msg(t, 2)
-    dtype_t_container = t__args__[1]
-    # assert hasattr(dtype_t_container, "__args__"), _missing_args_msg(dtype_t_container)
-    # assert len(dtype_t_container.__args__) == 1, _wrong_args_num_msg(
-    #     dtype_t_container, 1
-    # )
-    dtype_t = dtype_t_container.__args__[0]
-    try:
-        dtypes = _extract_dtypes(dtype_t)
-    except TypeError:
-        if isinstance(val, TypeInspector):
-            val._record_unsupported_type(t)
-            return
-        raise _unsupported_type_error(
-            t, f"Unsupported NumPy dtype {dtype_t!r}."
-        ) from None
-    if isinstance(val, TypeInspector):
-        val._record_pending_type_generic(t.__origin__)
-        val._record_user_class(*t__args__)
-        for arg in t__args__:
-            validate(val, arg)
-        return
-    val_dtype = val.dtype
-    if not any(dtype is Any or np.issubdtype(val_dtype, dtype) for dtype in dtypes):
-        raise _numpy_dtype_error(val, t)
-    validate(val.shape, t__args__[0])
-    return
+def _validated_iter[T](val: Iterable[T], item_t: Any, /) -> Iterable[T]:
+    for item in val:
+        if not _check(item, item_t):
+            raise ValidationError(item, item_t, diagnose(item, item_t))
+        yield item
 
 
-def _validate_typevar(val: Any, t: TypeVar) -> None:
-    if isinstance(val, TypeInspector):
-        val._record_typevar(t)
-        pass
-    bound = t.__bound__
-    if bound is not None:
-        try:
-            validate(val, bound)
-        except TypeError as e:
-            raise _typevar_error(val, t, e) from None
-
-
-# def _validate_callable(val: Any, t: Any) -> None:
-#     """
-#         Callable validation
-#     """
-#     assert hasattr(t, "__args__"), _missing_args_msg(t)
-#     assert isinstance(t.__args__, tuple), f"For type {repr(t)}, expected '__args__' to be a tuple."
-#     if not callable(val):
-#         raise _type_error(val, t, is_union=True)
-#     if not t.__args__:
-#         return
-#     exp_params = t.__args__[:-1]
-#     exp_ret = t.__args__[-1]
-#     sig = inspect.signature(val)
-#     empty = sig.empty
-#     params = sig.parameters
-#     ret = sig.return_annotation
-#     positional_only: typing.List[inspect.Parameter] = []
-#     positional_or_keyword: typing.Dict[str, inspect.Parameter] = {}
-#     var_positional: Optional[inspect.Parameter] = None
-#     keyword_only: typing.Dict[str, inspect.Parameter] = {}
-#     var_keyword: Optional[inspect.Parameter] = None
-#     for param_name, param in params.items():
-#         if param.kind == param.POSITIONAL_ONLY:
-#             positional_only.append(param)
-#         elif param.kind == param.POSITIONAL_OR_KEYWORD:
-#             positional_or_keyword[param_name] = param
-#         elif param.kind == param.VAR_POSITIONAL:
-#             var_positional = param
-#         elif param.kind == param.KEYWORD_ONLY:
-#             keyword_only[param_name] = param
-#         elif param.kind == param.VAR_KEYWORD:
-#             var_keyword = param
-#     # still work in progress
-#     raise _type_error(val, t, is_union=True)
-
-
-def validate(val: Any, t: Any) -> Literal[True]:
+def _check(val: Any, t: Any, /) -> bool:
     """
-    Performs runtime type-checking for the value ``val`` against type ``t``.
-    The function raises :obj:`TypeError` upon failure and returns :obj:`True` upon success.
-    The :obj:`True` return value means that :func:`validate` can be gated behind assertions
-    and compiled away on optimised execution:
+    Whether a value is valid for a type: the interpreter proper.
 
-    .. code-block:: python
+    The walk is **non-recursive**, via the explicit work stack below. The
+    motivation is correctness rather than elegance: what threatens the call stack
+    is the nesting depth of the *value*, not of the type. ``list[int]`` is a
+    shallow type, and a list nested two thousand deep is a legal value for
+    ``list[list[...]]``. A recursive walker would raise :class:`RecursionError`,
+    which is neither a validation failure nor an honest error. The flat loop also
+    avoids a Python call per node.
 
-        assert validate(val, t) # compiled away using -O and -OO
+    Conjunctive obligations — every item of a ``list[int]``, every key and value
+    of a ``dict[K, V]`` — are simply pushed, and the loop drains them. Unions are
+    the exception, and are handled by :func:`_backtrack`.
 
-    For structured types, the error message keeps track of the chain of validation failures, e.g.
-
-        >>> from typing import *
-        >>> from typing_validation import validate
-        >>> validate([[0, 1, 2], {"hi": 0}], list[Union[Collection[int], dict[str, str]]])
-        TypeError: Runtime validation error raised by validate(val, t), details below.
-        For type list[typing.Union[typing.Collection[int], dict[str, str]]], invalid value at idx: 1
-        For union type typing.Union[typing.Collection[int], dict[str, str]], invalid value: {'hi': 0}
-            For member type typing.Collection[int], invalid value at idx: 0
-            For type <class 'int'>, invalid value: 'hi'
-            For member type dict[str, str], invalid value at key: 'hi'
-            For type <class 'str'>, invalid value: 0
-
-    **Note.** For Python 3.7 and 3.8, use :obj:`~typing.Dict` and :obj:`~typing.List` instead of :obj:`dict` and :obj:`list` for the above examples.
-
-    :param val: the value to be type-checked
-    :type val: :obj:`~typing.Any`
-    :param t: the type to type-check against
-    :type t: :obj:`~typing.Any`
-    :raises TypeError: if ``val`` is not of type ``t``
-    :raises UnsupportedTypeError: if validation for type ``t`` is not supported
-    :raises AssertionError: if things go unexpectedly wrong with ``__args__`` for parametric types
-
+    Failure is hard and cheap: no path is tracked, no failure objects are
+    allocated, no context is threaded. This knows *that* it failed, never
+    *where*, and hands ``(val, t)`` to ``diagnose`` to find out.
     """
-    # pylint: disable = too-many-return-statements, too-many-branches, too-many-statements
-    unsupported_type_error: Optional[UnsupportedTypeError] = None
-    if not isinstance(t, Hashable):
-        if isinstance(val, TypeInspector):
-            val._record_unsupported_type(t)
+    stack: list[tuple[Any, Any]] = [(val, t)]
+    unions: list[list[Any]] = []
+    while True:
+        # A union member attempt that has drained without failing is a member
+        # that validated, which settles the union. Checking here, before
+        # anything is popped, is what makes "the attempt finished" observable:
+        # the stack is back to the depth it had when the attempt began.
+        while unions and len(stack) == unions[-1][2]:
+            unions.pop()
+        if not stack:
             return True
-        if unsupported_type_error is None:
-            unsupported_type_error = _unsupported_type_error(
-                t, "Type is not hashable."
-            )  # pragma: nocover
-        raise unsupported_type_error
-    if t is typing.Type:
-        # Replace non-generic 'Type' with non-generic 'type':
-        t = type
-    if t in _basic_types:
-        # speed things up for the likely most common case
-        _validate_type(val, typing.cast(type, t))
-        return True
-    if t is None or t is NoneType:
-        if isinstance(val, TypeInspector):
-            val._record_none()
-            return True
-        if val is not None:
-            raise _type_error(val, t)
-        return True
-    if t in _pseudotypes:
-        _validate_type(val, typing.cast(type, t))
-        return True
-    if t is Any:
-        if isinstance(val, TypeInspector):
-            val._record_any()
-            return True
-        return True
-    if isinstance(t, TypeVar):
-        _validate_typevar(val, t)
-        return True
-    if UnionType is not None and isinstance(t, UnionType):
-        _validate_union(val, t, use_UnionType=True)
-        return True
-    if hasattr(t, "__origin__"):  # parametric types
-        t__origin__ = t.__origin__
-        if t__origin__ is Union:
-            _validate_union(val, t)
-            return True
-        if t__origin__ in _get_type_classes("Literal"):
-            _validate_literal(val, t)
-            return True
-        if t__origin__ in _origins:
-            if isinstance(val, TypeInspector):
-                val._record_pending_type_generic(t__origin__)
+        val, t = stack.pop()
+        tt = type(t)
+        if tt is type:
+            # Plain classes, bare builtin collections, and NamedTuple
+            # subclasses. The overwhelmingly common case, and the only arm that
+            # reaches isinstance without a single function call before it.
+            if isinstance(val, t):
+                # Both halves of this test are load-bearing, and neither alone
+                # would do. `_fields` alone is not enough: 133 classes in `ast`
+                # carry one, and none is a tuple, so `val[i]` below would raise
+                # "object is not subscriptable" on every AST node. `tuple` alone
+                # is not enough either: os.stat_result, time.struct_time and
+                # sys.version_info are all tuple subclasses with no field names
+                # to check. A named tuple is, as far as the runtime is concerned,
+                # exactly the conjunction — the only construct that is both
+                # positionally addressable and carries field names.
+                #
+                # If some future class satisfies both without being a named
+                # tuple, it will be validated as one. That is the same
+                # indistinguishability TYPES.md already records for a
+                # hand-written tuple subclass defining `_fields`: there is no
+                # nominal marker to check, because typing.NamedTuple is a
+                # function and never appears in an __mro__.
+                if not issubclass(t, tuple):
+                    continue
+                fields = getattr(t, "_fields", None)
+                if fields is None:
+                    continue
+                annotations = t.__annotations__
+                for i, name in enumerate(fields):
+                    ann = annotations.get(name)
+                    if ann is None:
+                        continue
+                    if type(ann) is not type:
+                        ann = resolve(ann, t)
+                        if isinstance(ann, ForwardRef):
+                            raise UnsupportedTypeError(
+                                t, _unresolved_explanation(t, name, ann)
+                            )
+                    stack.append((val[i], ann))
+                continue
+        else:
+            if tt is GenericAlias:
+                origin = t.__origin__
+                args = t.__args__
+            elif tt is Union:  # type: ignore[comparison-overlap]
+                origin = Union
+                args = t.__args__
             else:
-                _validate_type(val, t__origin__)
-            if t__origin__ in _collection_origins:
-                ordered = t__origin__ in _ordered_collection_origins
-                _validate_collection(val, t, ordered)
-                return True
-            if t__origin__ in _mapping_origins:
-                _validate_mapping(val, t)
-                return True
-            if t__origin__ is tuple:
-                _validate_tuple(val, t)
-                return True
-            if t__origin__ in _iterator_origins:
-                if isinstance(val, TypeInspector):
-                    _validate_collection(val, t, ordered=False)
-                # Item type cannot be validated for iterators (use validated_iter)
-                return True
-            if t__origin__ in _maybe_collection_origins and isinstance(
-                val, typing.Collection
-            ):
-                _validate_collection(val, t, ordered=False)
-                return True
-        elif isinstance(t__origin__, type):
-            try:
-                import numpy as np  # pylint: disable = import-outside-toplevel
-
-                if issubclass(t__origin__, np.ndarray):
-                    _validate_numpy_array(val, t)
-                    return True
-            except ModuleNotFoundError:
-                pass
-            _validate_user_class(val, t)
-            return True
-    elif isinstance(t, type):
-        # The `isinstance(t, type)` case goes after the `hasattr(t, "__origin__")` case:
-        # e.g. `isinstance(list[int], type)` in 3.10, but we want to validate `list[int]`
-        # as a parametric type, not merely as `list` (which is what `_validate_type` does).
-        if Protocol in t.__mro__:  # type: ignore[comparison-overlap]
-            if hasattr(t, "_is_runtime_protocol") and getattr(
-                t, "_is_runtime_protocol"
-            ):
-                _validate_type(val, t)
-                return True
-            if isinstance(val, TypeInspector):
-                val._record_unsupported_type(t)
-                return True
-            unsupported_type_error = _unsupported_type_error(
-                t, "Protocol class is not runtime-checkable."
-            )  # pragma: nocover
-        elif _is_typed_dict(t):
-            _validate_typed_dict(val, t)
-            return True
-        else:
-            _validate_type(val, t)
-            return True
-    elif isinstance(t, (str, ForwardRef)):
-        if isinstance(t, str):
-            t_alias: str = t
-        else:
-            t_alias = t.__forward_arg__
-        if t_alias not in _validation_aliases:
-            if (
-                t_alias.isidentifier()
-                and not iskeyword(t_alias)
-                and not issoftkeyword(t_alias)
-            ):
-                hint = f"Perhaps set it with validation_aliases({t_alias}=...)?"
+                origin = get_origin(t)
+                args = get_args(t)
+            if origin is None:
+                # Any and None are inlined rather than delegated: they are
+                # identity tests on singletons, so they cannot shadow anything,
+                # and delegating them would make a Python call the entire cost of
+                # validate(val, Any).
+                if t is Any:
+                    continue
+                if t is None:
+                    if val is None:
+                        continue
+                elif _check_bare(val, t, tt, stack):
+                    continue
+            elif origin is Union:
+                # Members that are plain classes collapse to a single isinstance
+                # against the argument tuple, which __args__ already is. That
+                # covers int | None, str | bytes and int | str | None — the
+                # overwhelmingly common shapes — with no flag, no sequence and
+                # no attempts. Only structured members need sequential trial.
+                simple = True
+                for member in args:
+                    if type(member) is not type:
+                        simple = False
+                        break
+                if simple:
+                    if isinstance(val, args):
+                        continue
+                else:
+                    # A member attempt is the unit of success, and the flag must
+                    # be set by the unit completing rather than by any single
+                    # obligation inside it: given list[int] | list[str] and
+                    # [1, "a"], the 1 validating against int must not settle the
+                    # union. The recorded depth is what delimits the attempt.
+                    unions.append([val, args, len(stack), 1])
+                    stack.append((val, args[0]))
+                    continue
+            elif origin in _ITEM_ORIGINS:
+                if isinstance(val, origin):
+                    if not args:
+                        continue
+                    item_t = args[0]
+                    for item in val:
+                        stack.append((item, item_t))
+                    continue
+            elif origin in _MAPPING_ORIGINS:
+                if isinstance(val, origin):
+                    if not args:
+                        continue
+                    key_t, value_t = args
+                    for key, value in val.items():
+                        stack.append((key, key_t))
+                        stack.append((value, value_t))
+                    continue
+            elif origin is tuple:
+                if isinstance(val, tuple):
+                    if not args:
+                        # tuple[()] means the empty tuple, while bare
+                        # Tuple means any tuple — and both record no
+                        # arguments at all, so only the spelling tells them
+                        # apart. Tuple is a singleton, so identity does.
+                        if t is Tuple or not val:
+                            continue
+                    elif len(args) == 2 and args[1] is Ellipsis:
+                        item_t = args[0]
+                        for item in val:
+                            stack.append((item, item_t))
+                        continue
+                    if len(val) == len(args):
+                        for item, item_t in zip(val, args):
+                            stack.append((item, item_t))
+                        continue
+            elif origin is Literal:
+                # Matched by type *and* equality, or by identity for enum members
+                # and None. v1 tested `val in t.__args__`, which is bare ==, so
+                # Literal[1] accepted both True and 1.0. PEP 586 makes a
+                # literal's type part of its identity.
+                matched = False
+                val_t = type(val)
+                for literal in args:
+                    if literal is val or (
+                        type(literal) is val_t and literal == val
+                    ):
+                        matched = True
+                        break
+                if matched:
+                    continue
+            elif origin is Annotated:
+                # Not stripped: Annotated[int, Ge(0)] is a distinct type from
+                # int, with its own identity, and failures report it as written.
+                stack.append((val, t.__origin__))
+                continue
+            elif origin is type:
+                if _check_type_of(val, t, args):
+                    continue
+            elif origin in _ITERATOR_ORIGINS:
+                # The item type is uncheckable without consuming the value, and
+                # purity forbids that. validated_iter is the honest route.
+                if isinstance(val, Iterator):
+                    continue
+            elif origin in _MAYBE_ITEM_ORIGINS:
+                if isinstance(val, origin):
+                    if not args or not isinstance(val, Collection):
+                        # Not a Collection, so potentially one-shot: same rule as
+                        # Iterator[T], for the same reason.
+                        continue
+                    item_t = args[0]
+                    for item in val:
+                        stack.append((item, item_t))
+                    continue
+            elif origin is _BYTESTRING_ORIGIN:
+                if isinstance(val, Buffer):
+                    continue
+            elif origin in _UNSUPPORTED_ORIGINS:
+                raise UnsupportedTypeError(t, _UNSUPPORTED_ORIGINS[origin])
+            elif type(origin) is TypeAliasType:
+                # A generic alias: type Pair[T] = tuple[T, T]. Subscripting the
+                # alias's value substitutes the arguments for its parameters.
+                stack.append((val, origin.__value__[args]))
+                continue
+            elif isinstance(origin, type):
+                if _check_generic_class(val, t, origin, args, stack):
+                    continue
             else:
-                hint = (
-                    f"Perhaps set it with validation_aliases(**{{'{t_alias}': ...}})?"
-                )
-            unsupported_type_error = _unsupported_type_error(
-                t_alias, f"Type alias is not known. {hint}"
-            )  # pragma: nocover
-        else:
-            _validate_alias(val, t_alias)
-            return True
-    if isinstance(val, TypeInspector):
-        val._record_unsupported_type(t)
-        return True
-    if unsupported_type_error is None:
-        unsupported_type_error = _unsupported_type_error(t)  # pragma: nocover
-    raise unsupported_type_error
-
-
-def can_validate(t: Any) -> TypeInspector:
-    """
-    Checks whether validation is supported for the given type ``t``: if not,
-    :func:`validate` will raise :obj:`UnsupportedTypeError`.
-
-    .. warning::
-
-        The return type will be changed to :obj:`bool` in v1.3.0.
-        To obtain a :class:`TypeInspector` object, please use the newly
-        introduced :func:`inspect_type` instead.
-
-    :param t: the type to be checked for validation support
-    :type t: :obj:`~typing.Any`
-
-    """
-    inspector = TypeInspector()
-    validate(inspector, t)
-    return inspector
-
-
-def inspect_type(t: Any) -> TypeInspector:
-    r"""
-    Returns a :class:`TypeInspector` instance can be used wherever a boolean is
-    expected, and will indicate whether the type is supported or not:
-
-    >>> from typing import *
-    >>> from typing_validation import inspect_type
-    >>> res = inspect_type(tuple[list[str], Union[int, float, Callable[[int], int]]])
-    >>> bool(res)
-    False
-
-    The instance also records (with minimal added cost) the full structure of
-    the type as the latter was validated, which it then exposes via its
-    :attr:`TypeInspector.recorded_type` property:
-
-    >>> res = inspect_type(tuple[list[Union[str, int]],...])
-    >>> bool(res)
-    True
-    >>> res.recorded_type
-    tuple[list[typing.Union[str, int]], ...]
-
-    Any unsupported subtype encountered during the validation is left in place,
-    wrapped into an :class:`UnsupportedType`:
-
-    >>> inspect_type(tuple[list[str], Union[int, float, Callable[[int], int]]])
-    The following type cannot be validated against:
-    tuple[
-        list[
-            str
-        ],
-        Union[
-            int,
-            float,
-            UnsupportedType[
-                typing.Callable[[int], int]
-            ],
-        ],
-    ]
-
-    **Note.** For Python 3.7 and 3.8, use :obj:`~typing.Tuple` and :obj:`~typing.List` instead of :obj:`tuple` and :obj:`list` for the above examples.
-
-    :param t: the type to be checked for validation support
-    :type t: :obj:`~typing.Any`
-
-    """
-    inspector = TypeInspector()
-    validate(inspector, t)
-    return inspector
-
-
-T = typing.TypeVar("T")
-"""
-    Invariant type variable used by the functions :func:`validated`
-    and :func:`validated_iter`.
-"""
-
-
-def is_valid(val: T, t: Any) -> bool:
-    """
-    Performs the same functionality as :func:`validate`, but returning
-    :obj:`False` if validation is unsuccessful instead of raising error.
-
-    In case of validation failure, detailed failure information is accessible
-    via :func:`~typing_validation.validation_failure.latest_validation_failure`.
-    """
-    try:
-        validate(val, t)
-        _set_latest_validation_failure(None)
-        return True
-    except TypeError as e:
-        _set_latest_validation_failure(getattr(e, "validation_failure"))
+                raise UnsupportedTypeError(t)
+        if _backtrack(stack, unions):
+            continue
         return False
 
 
-def validated(val: T, t: Any) -> T:
+def _check_bare(
+    val: Any, t: Any, tt: type, stack: list[tuple[Any, Any]], /
+) -> bool:
     """
-    Performs the same functionality as :func:`validate`, but returns ``val``
-    if validation is successful.
+    The arm for types with no origin, other than :obj:`~typing.Any` and
+    :obj:`None`: everything that is neither parametrised nor a plain class.
 
-    Useful when multiple elements must be validated as part of a larger
-    expression, e.g. as part of a comprehension:
-
-    .. code-block :: python
-
-        def sortint(*items: int) -> list[int]:
-            return sorted(validate(i) for i in items)
-
+    Returns whether the check succeeded, having pushed any further obligations.
     """
-    validate(val, t)
-    return val
+    if tt is TypeAliasType:
+        # Not transparent: type MyInt = int keeps its own identity and reports as
+        # itself. It is also where a recursive type closes its cycle.
+        stack.append((val, t.__value__))
+        return True
+    if tt is TypeVar:
+        bound = t.__bound__
+        if bound is not None:
+            stack.append((val, bound))
+            return True
+        constraints = t.__constraints__
+        if constraints:
+            # A constrained type variable is semantically the union of its
+            # constraints. v1 ignored them, so validate(1.5, T) passed for a T
+            # constrained to int and str.
+            stack.append((val, Union[constraints]))
+            return True
+        return True
+    if tt is NewType:
+        # Vacuous beyond the supertype: NewType's constructor is the identity
+        # function and isinstance against it raises, so there is no runtime
+        # witness of the distinction. The type is not stripped, so failures
+        # report UserId rather than int.
+        stack.append((val, t.__supertype__))
+        return True
+    if t is NamedTuple:
+        # "Any named tuple instance", which is what type checkers enforce. There
+        # is no nominal marker to check — NamedTuple is a function, and
+        # never appears in a named tuple's __mro__ — so the structural probe is
+        # the only runtime witness there is.
+        return isinstance(val, tuple) and hasattr(type(val), "_fields")
+    if isinstance(t, type):
+        if is_typeddict(t):
+            return _check_typed_dict(val, t, stack)
+        if is_protocol(t):
+            if not getattr(t, "_is_runtime_protocol", False):
+                raise UnsupportedTypeError(
+                    t,
+                    "Protocol is not runtime-checkable: isinstance against it "
+                    "raises. Decorate it with @typing.runtime_checkable.",
+                )
+        return isinstance(val, t)
+    if isinstance(t, (str, ForwardRef)):
+        raise UnsupportedTypeError(t, _INLINE_FORWARD_REF_EXPLANATION)
+    raise UnsupportedTypeError(t)
 
 
-def validated_iter(val: typing.Iterable[T], t: Any) -> typing.Iterable[T]:
+def _check_typed_dict(
+    val: Any, t: Any, stack: list[tuple[Any, Any]], /
+) -> bool:
     """
-    Performs the same functionality as :func:`validated`, but the iterable
-    ``var`` is wrapped into an iterator which validates its items prior to
-    them being yielded.
+    The arm for :class:`~typing.TypedDict`.
+
+    Extra keys are not checked, and cannot be: 3.14's ``TypedDict`` rejects
+    PEP 728's ``closed=True`` outright. Nor is it checked that the value is
+    *actually* a ``TypedDict`` instance, which has no runtime identity — any
+    conforming mapping is indistinguishable from one.
     """
-    validate(val, t)
-    if t in _iterator_origins:
-        return val
-    if hasattr(t, "__origin__") and t.__origin__ in _iterator_origins:
-        # assert hasattr(t, "__args__"), _missing_args_msg(t)
-        # assert (
-        #     isinstance(t.__args__, tuple) and len(t.__args__) == 1
-        # ), _wrong_args_num_msg(t, 1)
-        item_t = t.__args__[0]
-        return (validated(item, item_t) for item in val)
-    raise ValueError(
-        "Argument 't' must be Iterable, Iterator, Iterable[T], or Iterator[T]."
+    if not isinstance(val, Mapping):
+        return False
+    for key in t.__required_keys__:
+        if key not in val:
+            return False
+    # Requiredness comes from __required_keys__ rather than being re-derived from
+    # the qualifiers: the class computes it, and it stays correct under
+    # inheritance and total=False.
+    annotations = t.__annotations__
+    for key, item in val.items():
+        if not isinstance(key, str):
+            return False
+        ann = annotations.get(key)
+        if ann is None:
+            continue
+        if type(ann) is not type:
+            ann = strip_qualifiers(resolve(ann, t))
+            if isinstance(ann, ForwardRef):
+                raise UnsupportedTypeError(
+                    t, _unresolved_explanation(t, key, ann)
+                )
+        stack.append((item, ann))
+    return True
+
+
+def _check_type_of(val: Any, t: Any, args: tuple[Any, ...], /) -> bool:
+    """
+    The arm for ``Type[T]`` and ``type[T]``.
+
+    ``T`` may be a class, a union of classes, or :obj:`~typing.Any`. Anything
+    else — ``Type[list[int]]`` and friends — is unsupported: :func:`issubclass`
+    cannot express it, and inventing a bespoke subtype relation is out of scope.
+    """
+    if not isinstance(val, type):
+        return False
+    if not args:
+        return True
+    (arg,) = args
+    if arg is Any:
+        return True
+    if type(arg) is type:
+        return issubclass(val, arg)
+    if type(arg) is Union:  # type: ignore[comparison-overlap]
+        members = arg.__args__
+        for member in members:
+            if type(member) is not type:
+                raise UnsupportedTypeError(t, _TYPE_ARG_EXPLANATION)
+        return issubclass(val, members)
+    raise UnsupportedTypeError(t, _TYPE_ARG_EXPLANATION)
+
+
+def _check_generic_class(
+    val: Any,
+    t: Any,
+    origin: type,
+    args: tuple[Any, ...],
+    stack: list[tuple[Any, Any]],
+    /,
+) -> bool:
+    """
+    The arm for a parametrised class the core knows nothing about — and, by that
+    very fact, the extension point.
+
+    A class that declares a ``__validate__`` classmethod, or that has a
+    registered validator, says how its arguments are checked. Absent either, the
+    arguments go unchecked and the class validates on its origin alone: a generic
+    class does not, in general, expose enough at runtime to determine them, so
+    that is the specified meaning rather than a shortfall. It is *not* an error
+    to parametrise a class we cannot introspect.
+
+    The exception is a class this distribution ships a plugin for, whose
+    arguments *are* determinable. Leaving those unchecked would report success we
+    had not earned, so it is an error naming the import that would fix it.
+    """
+    check = getattr(origin, "__validate__", None)
+    if check is None:
+        check = registered_validator(origin)
+    if check is None:
+        if plugin_import(origin) is not None:
+            raise UnsupportedTypeError(t, unsupported_explanation(origin))
+        return isinstance(val, origin)
+    if not isinstance(val, origin):
+        return False
+    return bool(check(val, args))
+
+
+def _backtrack(
+    stack: list[tuple[Any, Any]], unions: list[list[Any]], /
+) -> bool:
+    """
+    Move to the next member of the innermost union attempt, if there is one.
+
+    Returns whether validation may continue. :obj:`False` means the failure was
+    not inside any union attempt, or that every enclosing union has run out of
+    members, so it is final.
+
+    This is reached only on failure, which is exceptional by definition, so the
+    loop above pays nothing for its existence. Discarding the failed attempt's
+    leftovers is sound only because validation is pure: a member that failed
+    part-way leaves nothing behind for the next member to trip over.
+    """
+    while unions:
+        val, members, depth, index = unions[-1]
+        if index < len(members):
+            del stack[depth:]
+            unions[-1][3] = index + 1
+            stack.append((val, members[index]))
+            return True
+        # This union has no members left, so it has failed — which is itself a
+        # failure of whatever attempt encloses it. Keep unwinding.
+        unions.pop()
+    return False
+
+
+_INLINE_FORWARD_REF_EXPLANATION = (
+    "A forward reference written inline records no module and no owner, so "
+    "there is nothing to resolve it against. Note that resolving it against "
+    "the calling frame is not an option: validators are interned, so the same "
+    "reference would mean whatever the first caller to build it meant.\n"
+    "Use a PEP 695 type alias instead: 'type JSON = int | list[JSON]', which "
+    "is lazily evaluated and resolves against the module that defines it."
+)
+
+
+_TYPE_ARG_EXPLANATION = (
+    "Type[T] supports T being a class, a union of classes, or Any. issubclass "
+    "cannot express anything else, and this library does not invent a subtype "
+    "relation of its own."
+)
+
+
+def _unresolved_explanation(t: Any, field: str, ref: ForwardRef, /) -> str:
+    """The explanation for an annotation naming something that does not exist."""
+    return (
+        f"Field {field!r} of {t.__qualname__!r} refers to unresolved name "
+        f"{ref.__forward_arg__!r}."
     )

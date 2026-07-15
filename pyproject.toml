@@ -1,13 +1,63 @@
-# pyproject.toml
-[build-system]
-requires = [
-    "setuptools>=45",
-    "wheel",
-    "setuptools_scm>=6.2"
+[project]
+name = "typing-validation"
+dynamic = ["version"]
+authors = [{ name = "Hashberg" }]
+description = "A library to perform runtime validation of Python objects using type hints."
+readme = "README.md"
+requires-python = ">=3.14"
+license = "LGPL-3.0-or-later"
+license-files = ["LICENSE"]
+dependencies = []
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3.14",
+    "Natural Language :: English",
+    "Typing :: Typed",
 ]
-build-backend = "setuptools.build_meta"
 
-# see https://github.com/pypa/setuptools_scm
-[tool.setuptools_scm]
-version_scheme = "post-release"   # use post-release scheme (default is pre-release of next version)
-local_scheme = "no-local-version" # interferes with PyPI
+[project.urls]
+Documentation = "https://typing-validation.readthedocs.io"
+Repository = "https://github.com/hashberg-io/typing-validation"
+Issues = "https://github.com/hashberg-io/typing-validation/issues"
+
+[build-system]
+requires = ["hatchling == 1.30.1"]
+build-backend = "hatchling.build"
+
+[tool.black]
+target-version = ["py314"]
+line-length = 80
+
+[tool.pytest.ini_options]
+testpaths = ["test"]
+xfail_strict = true
+filterwarnings = ["error"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+files = ["typing_validation", "test", "benchmark"]
+
+[tool.pyright]
+typeCheckingMode = "off"
+reportInvalidTypeForm = false
+
+[tool.hatch.version]
+path = "typing_validation/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["typing_validation"]
+
+[tool.hatch.build.targets.sdist]
+only-include = ["typing_validation", "README.md", "LICENSE"]
+
+[dependency-groups]
+dev = ["pytest >=8.0", "mypy >=1.14", "black >=24.0", "numpy >=2.0"]
+docs = [
+    "sphinx",
+    "sphinx-rtd-theme",
+    "sphinx-autodoc-typehints",
+    "typing_extensions",
+]

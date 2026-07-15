@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: LGPL-3.0-or-later
+
+# The conformance suite is the structural member that lets the validation
+# mechanisms share no implementation code, so it runs on every push. Several
+# independent implementations of one specification are several places to drift,
+# and the drift is silent.
+#
+# The benchmarks are deliberately *not* gated here. A hard performance threshold
+# on a noisy shared runner produces flakes and then gets disabled, which is worse
+# than not having it; the numbers are tracked over time instead.
+
+name: Checks
+
+on:
+  push:
+    branches: [main, v2]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The benchmark suite loads v1 out of the trunk, and some tests shell
+          # out to git. A shallow clone would not have it.
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --group dev
+      - name: Tests
+        run: uv run --no-sync pytest
+      - name: Types
+        run: uv run --no-sync mypy
+      - name: Formatting
+        run: uv run --no-sync black --check typing_validation test benchmark
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --group docs
+      # -W turns warnings into errors: a broken cross-reference is a broken
+      # document, and Read the Docs runs sphinx directly without the generator,
+      # so the generated pages must already be committed and current.
+      - name: Build the documentation
+        run: |
+          cd docs
+          uv run --no-sync python make-api.py
+          uv run --no-sync sphinx-build -M html . _build -W
+      - name: Check the generated API pages are committed and current
+        run: git diff --exit-code -- docs/api docs/api-toc.rst
