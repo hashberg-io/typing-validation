@@ -422,7 +422,9 @@ Extensibility needs no new machinery, because the dispatch point is already ther
 
 It is also free. `int`, `list[int]`, `dict[str, int]`, unions and literals all resolve long before that arm, so nothing that is not *already* unknown pays anything for its existence.
 
-NumPy lands there naturally: `NDArray[np.uint8]` is `np.ndarray[tuple[Any, ...], np.dtype[np.uint8]]`, whose origin is `np.ndarray` — a plain class — so it falls through every other form and arrives exactly where the hook is.
+NumPy lands there naturally: `NDArray[np.uint8]` *is* `np.ndarray[_AnyShape, np.dtype[np.uint8]]`, whose origin is `np.ndarray` — a plain class — so it falls through every other form and arrives exactly where the hook is.
+
+One step was missed in that account, and it costs nothing because another decision already paid for it. In modern NumPy `NDArray` is itself a **PEP 695 alias**, so `NDArray[np.uint8]` has origin `NDArray`, not `np.ndarray`, and only becomes an `ndarray` type after the alias substitutes its parameters. Supporting generic aliases (TYPES.md) is what makes that happen, so the hook is reached anyway — but the arrival is two hops, not one.
 
 ### Two flavours, both needed
 
@@ -436,9 +438,32 @@ The required interface is deliberately minimal: **give me a boolean**. Asking ev
 
 Beyond that, a plugin may optionally supply:
 
-- **Structure** — its component types, so `inspect_type` can report them and totality (§2) can propagate through them. NumPy needs this: `NDArray[np.uint8 | np.float32]` has a union inside it that the core validates.
+- **Structure** — which of its type arguments the core validates, so `inspect_type` can report them and totality (§2) can propagate through them.
 - **Diagnostics** — so failures explain themselves in the plugin's own terms rather than generically.
 - **An emitter** — for a sophisticated plugin that wants to be inlined by §3.4.
+
+#### Structure is not optional in the way it looks, and the core cannot infer it
+
+The obvious reading is that structure is a nicety, and that absent it the core can just treat every type argument as a component. Building the NumPy plugin shows that is wrong, and that the two are not the same thing at all.
+
+**Not every type argument is a component.** `ndarray[shape, dtype]` has one of each:
+
+| Argument | What it is |
+|---|---|
+| `tuple[int, int]` | an ordinary type, which the *core* checks the array's `.shape` tuple against |
+| `np.dtype[np.uint8]` | a *specification the plugin interprets*, never a validation target |
+
+Treating both as components makes `np.dtype[np.uint8]` one — and it is itself a parametrised NumPy class with no validator of its own, so totality poisons it, and with it **every array type there is**. `can_validate(NDArray[np.uint8])` would be `False` forever, with the plugin loaded.
+
+So the plugin declares which arguments are components, and NumPy declares exactly one: the shape. That is also what makes shape validation free — the shape type goes straight back to the core, so a fixed rank and even `tuple[Literal[2], Literal[2]]` work with no shape logic in the plugin at all.
+
+#### Registration must invalidate the cache
+
+Registering a validator is the one operation that changes **what is supported**, and it therefore invalidates every interned node.
+
+This is not housekeeping; it is §4.1's invariant. A node interned before `import typing_validation.numpy` records `NDArray[np.uint8]` as unsupported, and would go on saying so afterwards while a cold cache said otherwise — so the verdict would depend on whether anything had happened to ask first. Clearing everything is heavy-handed and exactly right: registration happens at import time and approximately never after.
+
+Worth noting because it is the **only** hole ever found in "interning is never semantically observable", and it was found by using the API rather than by reasoning about it.
 
 ### Plugins are a de-optimisation boundary
 
