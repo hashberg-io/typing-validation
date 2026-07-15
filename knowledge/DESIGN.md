@@ -220,9 +220,17 @@ All three validators fail hard and say only *that* they failed. Everything a use
 
 **This is the single most valuable consequence of the design.** Because diagnostics are produced in exactly one place, there is exactly one implementation of them — so the conformance obligation between mechanisms (§10) reduces to *"do they agree on the boolean?"*, which is a far smaller thing to police than "do they agree on the message". And because the second traversal only ever runs on a failure, which is by definition exceptional, it may be as slow, allocating and thorough as it likes.
 
-`diagnose` is, in effect, v1's `validate` — recursive, allocating and rich — demoted from the hot path to diagnostics duty, where its costs stop mattering and its quality is the entire point.
+`diagnose` is, in effect, v1's `validate` — allocating and rich — demoted from the hot path to diagnostics duty, where its costs stop mattering and its quality is the entire point.
 
 It takes the value as well as the type, because the message must say *where* in the value the failure was: `invalid value at idx: 2`, inside `at key: 'a'`. A structural description of the type alone cannot say that.
+
+**It is not recursive, though.** An earlier draft said it could be, reasoning that it runs only on failures and may therefore be as slow as it likes. Slow it may be; *deep* it may not, and the two are not the same freedom.
+
+A failure tree is as deep as the **value**, for the same reason §3.2's walk is: the failing path through a list nested two thousand deep is two thousand levels long. A recursive `diagnose` would then raise `RecursionError` on exactly the values `validate` goes out of its way to handle — and it would raise it *on the way out of* an ordinary `ValidationError`, converting a correct verdict into a stack overflow. That is precisely the dishonest error the work stack exists to prevent, so diagnosis gets one too.
+
+The same applies to everything that *reads* the tree — its `walk`, its `repr`, its `str`. A dataclass's generated `__repr__` recurses through its fields, so the tree cannot be a plain dataclass with `repr=True`: it would explode the moment anyone looked at it, including inside a debugger or a test runner. This is a small trap and it caught the first implementation.
+
+The lesson generalises past this section: **iterative-because-the-value-is-deep is a property of every artifact shaped like the value**, not just of the validators.
 
 The message format is deliberately unsettled. See §14.
 

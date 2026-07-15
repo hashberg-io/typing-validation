@@ -38,6 +38,7 @@ from typing import Annotated, Any, Literal, TypeVar, Union, is_typeddict
 
 from annotationlib import ForwardRef
 
+from .diagnosis import diagnose
 from .errors import UnsupportedTypeError, ValidationError
 from .plugins import (
     plugin_import,
@@ -129,7 +130,7 @@ def validate(val: Any, t: Any, /) -> typing.Literal[True]:
     """
     if _check(val, t):
         return True
-    raise ValidationError(val, t)
+    raise ValidationError(val, t, diagnose(val, t))
 
 
 def is_valid(val: Any, t: Any, /) -> bool:
@@ -160,7 +161,7 @@ def validated[T](val: Any, t: type[T], /) -> T:
     """
     if _check(val, t):
         return typing.cast(T, val)
-    raise ValidationError(val, t)
+    raise ValidationError(val, t, diagnose(val, t))
 
 
 def validated_iter[T](val: Iterable[T], t: Any, /) -> Iterable[T]:
@@ -202,7 +203,7 @@ def validated_iter[T](val: Iterable[T], t: Any, /) -> Iterable[T]:
 def _validated_iter[T](val: Iterable[T], item_t: Any, /) -> Iterable[T]:
     for item in val:
         if not _check(item, item_t):
-            raise ValidationError(item, item_t)
+            raise ValidationError(item, item_t, diagnose(item, item_t))
         yield item
 
 
