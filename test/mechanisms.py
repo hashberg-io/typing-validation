@@ -16,7 +16,7 @@ entry each to :data:`MECHANISMS` — not writing a second and third suite.
 from collections.abc import Callable
 from typing import Any, Literal
 
-from typing_validation import validate, validator
+from typing_validation import compiled_validator, validate, validator
 
 __all__ = ("MECHANISMS", "MECHANISM_IDS")
 
@@ -39,8 +39,13 @@ def _via_validator(val: Any, t: Any) -> Literal[True]:
     return validator(t)(val)
 
 
-MECHANISMS: list[Mechanism] = [validate, _via_validator]
+def _via_compiled(val: Any, t: Any) -> Literal[True]:
+    """``compiled_validator(t)`` adapted to the uniform shape."""
+    return compiled_validator(t)(val)
+
+
+MECHANISMS: list[Mechanism] = [validate, _via_validator, _via_compiled]
 """Every mechanism that validates. All must agree on every case."""
 
-MECHANISM_IDS: list[str] = ["validate", "validator"]
+MECHANISM_IDS: list[str] = ["validate", "validator", "compiled_validator"]
 """Names for the mechanisms, so a failure says which one drifted."""

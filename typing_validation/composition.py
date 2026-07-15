@@ -168,6 +168,29 @@ def _backtrack(stack: Stack, unions: Unions, /) -> bool:
     return False
 
 
+def runner_for(node: TypeNode, /) -> Callable[[Any], bool]:
+    """
+    A node's composed check as a plain predicate, driver and all.
+
+    What a caller outside this module needs, and the only safe way to ask: a
+    check that can descend pushes onto a stack that something must then drain,
+    and handing it a throwaway list silently loses the work — which reports valid
+    for a value that is not.
+    """
+    check, can_push = _composed(node)
+    if not can_push:
+
+        def flat(val: Any) -> bool:
+            return check(val, _NO_STACK, _NO_UNIONS)
+
+        return flat
+
+    def driven(val: Any) -> bool:
+        return _drive(val, check)
+
+    return driven
+
+
 def _composed(node: TypeNode, /) -> Composed:
     """
     Compose a check for every node reachable from this one, children first.
