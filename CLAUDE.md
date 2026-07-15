@@ -33,13 +33,17 @@ Each gets a sub-branch off `main`, carries the tests that cover it, and is merge
 
 | # | Milestone | Branch | Contents | Status |
 |---|---|---|---|---|
-| 1 | The compositor | `validator` | `validator(t)`: a closure per node form, composed over the interned graph; late binding at back-edges; `UnsupportedTypeError` raised eagerly at construction. Added to `MECHANISMS`, so the whole corpus and the deep-value tests run through it | not started |
+| 1 | The compositor | `validator` | `validator(t)`: a closure per node form, composed over the interned graph; late binding at back-edges; `UnsupportedTypeError` raised eagerly at construction. Added to `MECHANISMS`, so the whole corpus and the deep-value tests run through it | done |
 | 2 | Break-even | `validator-benchmarks` | §11's unanswered number: how many values must be validated before `validator(t)` overtakes `validate`. Construction cost, per-call cost, and the crossover | not started |
 | 3 | Release polish | `validator-docs` | README, guide, `DESIGN.md`, and the 2.1 release | not started |
 
 **The composition shape is settled by measurement, and it is not what §3.3 assumed.** Composing closures that call each other directly is 3× faster than `validate` per node — and raises `RecursionError` on exactly the deeply nested values `validate` handles, which would make the two mechanisms disagree. Composing closures that push onto a shared work stack is safe and only 1.16× faster, which does not earn a second mechanism at all.
 
 The resolution: **depth grows only at container boundaries.** A leaf check cannot descend, so a container calls its leaf children *directly* — free and safe — and pushes only children that can themselves descend. Measured at 2.9× `validate` on `list[int]`, while surviving a value nested twenty thousand deep.
+
+## Owed, at the end of 2.2
+
+- **How the benchmarks are presented.** With all three mechanisms in place the suite finally has something to compare, and printing it to a terminal stops being enough. Wanted: a **table artefact committed to the repo** — the numbers, the break-even points, and the captured environment, in a form a reader can consult without running anything. Raise it as its own round once `compiled_validator` lands; §11 says results are tracked over time rather than gated in CI, and this is what "tracked" should mean.
 
 ## Waiting on Python 3.15
 

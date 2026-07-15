@@ -8,15 +8,10 @@ not, which matters because the whole architecture rests on independent
 implementations of one specification agreeing, and **the drift is silent**: a
 mechanism that disagrees returns a wrong answer with no exception and no symptom.
 
-There is only one *validator* in 2.0, so there is not yet a mechanism axis to
-cross. But there are already two independent walkers of value against type — the
-interpreter, which dispatches on the raw type with no cache, and ``diagnose``,
-which reads the node model — and they share no code. So the oracle exists
-already: **whenever the interpreter rejects a value, diagnosis must reproduce
-that failure, and whenever it accepts one, diagnosis must find nothing.**
-
-``validator`` in 2.1 and ``compiled_validator`` in 2.2 join by being added to
-``MECHANISMS``.
+Three independent walkers of value against type now exist, sharing no code: the
+interpreter, which dispatches on the raw type and caches nothing; ``validator``,
+which composes closures over the interned graph; and ``diagnose``, which reads
+that graph. Every generated pair goes through all three, and they must agree.
 """
 
 import random
@@ -24,7 +19,12 @@ from typing import Any, Literal, NamedTuple, NotRequired, TypedDict
 
 import pytest
 
-from typing_validation import UnsupportedTypeError, ValidationError, is_valid
+from typing_validation import (
+    UnsupportedTypeError,
+    ValidationError,
+    is_valid,
+    validator,
+)
 from typing_validation.diagnosis import DiagnosisFailure, _diagnose
 
 SEED = 20260715
@@ -120,6 +120,33 @@ def _cases() -> list[tuple[Any, Any]]:
 
 
 CASES = _cases()
+
+
+@pytest.mark.parametrize("case", CASES, ids=lambda c: repr(c)[:60])
+def test_the_validator_agrees_with_the_interpreter(
+    case: tuple[Any, Any],
+) -> None:
+    """
+    Two implementations that share nothing, on cases nobody chose.
+
+    The interpreter decides every arm per value; the validator decided them all
+    when the type was analysed. Nothing but the catalogue makes them agree.
+    """
+    val, t = case
+    try:
+        expected = is_valid(val, t)
+    except UnsupportedTypeError:
+        pytest.skip("unsupported type")
+    try:
+        check = validator(t)
+    except UnsupportedTypeError:  # pragma: no cover
+        pytest.fail("the interpreter honoured a type the validator refused")
+    got: bool
+    try:
+        got = check(val)
+    except ValidationError:
+        got = False
+    assert got is expected
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda c: repr(c)[:60])

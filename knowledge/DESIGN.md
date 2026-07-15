@@ -159,6 +159,26 @@ Construction is cheap, and **structurally shared**: because nodes are interned o
 
 **Recursion needs late binding, at back-edges only.** A validator for a recursive alias cannot capture its own validator at construction time, because it does not exist yet. The closure therefore reads the node's validator slot when called rather than capturing it. That is one indirection — paid only at the cycle, never on the acyclic majority of a type.
 
+#### The closures do not simply call one another
+
+That is the obvious composition, and this section assumed it. It is wrong, and the measurements say so plainly:
+
+| Shape | `list[int]`×1000 | Deeply nested value |
+|---|---|---|
+| Closures that **call** one another | **19.4 ns/node** — 3× `validate` | `RecursionError` |
+| Closures that all **push** to a work stack | 49.9 ns/node — 1.16× `validate` | fine |
+| **Call what cannot descend, push what can** | **20.0 ns/node** — 2.9× `validate` | fine |
+
+Calling recurses once per level of the **value**, so it raises `RecursionError` on exactly the values §3.2 uses a work stack to survive. Two mechanisms disagreeing about one value, one of them by crashing, is what §10 exists to prevent — and it is not an edge case, since a recursive alias over a deep document is the whole reason PEP 695 aliases are supported.
+
+Pushing everything fixes that and surrenders the speed: 1.16× does not earn a second mechanism, and without the speed `validator` has no reason to exist.
+
+The resolution is the third row, and it follows from one observation: **depth grows only where a check can descend.** A check that answers from the value alone cannot grow the stack, so calling it costs one call and risks nothing. So a container *calls* the children that cannot descend and *pushes* the ones that can. `list[int]` is a container over a leaf, so it takes the fast path; a recursive alias takes the safe one.
+
+"Can descend" is a property of the **check**, not of the node's children. A union of plain classes has members and still collapses to a single `isinstance` against the argument tuple, so it can no more descend than `int` can, and a parent may call it. Getting this wrong is silent — a lost 3×, or a crash on deep values — so it is pinned by tests rather than trusted.
+
+One consequence worth stating: the driver is still a loop with the same union flag-gating as §3.2. What `validator` removes is not the loop but the *dispatch* — every arm is chosen once, when the type is analysed, and the loop only calls what it is handed.
+
 ### 3.4 `compiled_validator`
 
 ```python

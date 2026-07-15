@@ -172,7 +172,16 @@ class TypeNode:
     to expose at all.
     """
 
-    __slots__ = ("_t", "_form", "_children", "_labels", "_supported", "_reason")
+    __slots__ = (
+        "_t",
+        "_form",
+        "_children",
+        "_labels",
+        "_supported",
+        "_reason",
+        "_check",
+        "_can_push",
+    )
 
     _t: Any
     """The type this node was built from. Display is its :func:`repr`."""
@@ -200,6 +209,18 @@ class TypeNode:
     _reason: str | None
     """Why this node itself is unsupported, if it is. :obj:`None` otherwise."""
 
+    _check: Any
+    """
+    The composed check for this type, once something has asked for one.
+
+    Memoised here rather than beside the compositor because a cycle needs a slot
+    to close through: a check that is still being built cannot be captured, so
+    the back-edge reads this at call time instead.
+    """
+
+    _can_push: bool
+    """Whether :attr:`_check` can descend, which is what decides call-versus-push."""
+
     def __new__(cls, t: Any, /) -> Self:
         self = object.__new__(cls)
         self._t = t
@@ -212,6 +233,8 @@ class TypeNode:
         # value to start from. _settle_support then iterates to a fixed point.
         self._supported = True
         self._reason = None
+        self._check = None
+        self._can_push = False
         return self
 
     @property

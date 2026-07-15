@@ -2,6 +2,7 @@
 
 """Runtime validation using type hints."""
 
+from .composition import validator
 from .diagnosis import Detail, Location, Place, ValidationFailure
 from .errors import UnsupportedTypeError, ValidationError
 from .inspection import (
@@ -36,4 +37,5 @@ __all__ = (
     "validate",
     "validated",
     "validated_iter",
+    "validator",
 )
