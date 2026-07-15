@@ -19,7 +19,7 @@ Keep them that way.
 | Release | Contents | Status |
 |---|---|---|
 | **2.0** | `validate` and everything around it — the interpreter, node model, failure model, resolution, plugins | **released** (tag `v2.0.0`) |
-| **2.1** | `validator` — closure composition | **implemented**, unreleased |
+| **2.1** | `validator` — closure composition | **released** (tag `v2.1.0`) |
 | **2.2** | `compiled_validator` — codegen via `exec` | not started |
 | later | marshalling — persistent bytecode cache | blocked on an unsolved staleness problem (DESIGN.md §14) |
 
@@ -47,7 +47,7 @@ Each gets a sub-branch off `main`, carries the tests that cover it, and is merge
 
 | # | Milestone | Branch | Contents | Status |
 |---|---|---|---|---|
-| 1 | Benchmark coverage | `compiled-benchmarks` | The cases that will judge the emitter, **before** it exists: heavily-shared types, which are what the inlining budget trades against and which nothing currently stresses; a NumPy case, since a plugin is a de-optimisation boundary and the only way to know its cost is to measure it; deep and recursive shapes | not started |
+| 1 | Benchmark coverage | `compiled-benchmarks` | The cases that will judge the emitter, **before** it exists: heavily-shared types, which are what the inlining budget trades against and which nothing currently stresses; a NumPy case, since a plugin is a de-optimisation boundary and the only way to know its cost is to measure it; deep and recursive shapes | done |
 | 2 | The emitter | `compiled-validator` | Source emission, `exec`, one function per recursion root, a call at every plugin. Added to `MECHANISMS` | not started |
 | 3 | The inlining budget | `inlining-budget` | Tuned against milestone 1's data, not against argument | not started |
 | 4 | Release polish | `compiled-docs` | README, guide, `DESIGN.md`, the 2.2 release — and the benchmark table, **discussed before it is executed** | not started |

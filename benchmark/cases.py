@@ -35,6 +35,92 @@ class Movie(TypedDict):
 type JSON = int | str | bool | None | list[JSON] | dict[str, JSON]
 
 
+class Wide(TypedDict):
+    """
+    A TypedDict wide enough that unrolling it is a decision rather than a
+    detail.
+
+    Forty fields is what the inlining budget is *for*: emitted inline, this is
+    forty checks at every occurrence, and the design's own worked example of the
+    body exploding.
+    """
+
+    f00: int
+    f01: str
+    f02: int
+    f03: str
+    f04: int
+    f05: str
+    f06: int
+    f07: str
+    f08: int
+    f09: str
+    f10: int
+    f11: str
+    f12: int
+    f13: str
+    f14: int
+    f15: str
+    f16: int
+    f17: str
+    f18: int
+    f19: str
+    f20: int
+    f21: str
+    f22: int
+    f23: str
+    f24: int
+    f25: str
+    f26: int
+    f27: str
+    f28: int
+    f29: str
+    f30: int
+    f31: str
+    f32: int
+    f33: str
+    f34: int
+    f35: str
+    f36: int
+    f37: str
+    f38: int
+    f39: str
+
+
+type Shared = dict[str, list[int]]
+"""
+One sub-type, mentioned many times over.
+
+Sharing is what makes composition cheap and what unrolling destroys by
+construction: a node referenced twenty times unrolls twenty times. Nothing else
+in this corpus stresses that, so nothing else can tell the inlining budget it is
+wrong.
+"""
+
+type SharedTwenty = tuple[
+    Shared,
+    Shared,
+    Shared,
+    Shared,
+    Shared,
+    Shared,
+    Shared,
+    Shared,
+    Shared,
+    Shared,
+    Shared,
+    Shared,
+    Shared,
+    Shared,
+    Shared,
+    Shared,
+    Shared,
+    Shared,
+    Shared,
+    Shared,
+]
+
+
 @final
 @dataclass(frozen=True, slots=True)
 class Case:
@@ -72,6 +158,14 @@ class Case:
     function call*. That claim should be tested rather than admired.
     """
 
+    needs: str | None = None
+    """
+    A module that must be importable for this case to mean anything.
+
+    NumPy is optional, and a benchmark that silently skips is worse than one that
+    says why.
+    """
+
     v1_comparable: bool = True
     """
     Whether v1 supports this type, so the comparison means something.
@@ -95,6 +189,39 @@ def _ints(n: int) -> list[int]:
 def _strs(n: int) -> list[str]:
     rng = _rng()
     return [f"s{rng.randint(0, 1000)}" for _ in range(n)]
+
+
+def _wide() -> dict[str, Any]:
+    return {f"f{i:02}": (i if i % 2 == 0 else f"s{i}") for i in range(40)}
+
+
+def _shared_one() -> dict[str, list[int]]:
+    return {"a": _ints(5), "b": _ints(5)}
+
+
+_WIDE_FIELDS = tuple(
+    (f"f{i:02}", int if i % 2 == 0 else str) for i in range(40)
+)
+"""
+The field table, built once.
+
+Hoisted out of the check below because a competent programmer would hoist it: an
+earlier version built the key with an f-string per field per call, which made the
+baseline exactly as slow as the interpreter and would have flattered every
+mechanism measured against it.
+"""
+
+_MISSING = object()
+
+
+def _hand_wide(val: Any) -> bool:
+    if not isinstance(val, dict):
+        return False
+    for key, field_t in _WIDE_FIELDS:
+        item = val.get(key, _MISSING)
+        if item is _MISSING or not isinstance(item, field_t):
+            return False
+    return True
 
 
 def _nested(depth: int) -> Any:
@@ -135,8 +262,62 @@ def _hand_tuple_int_str(val: Any) -> bool:
     )
 
 
+def _numpy_cases() -> list[Case]:
+    """
+    NumPy, which is the only plugin and therefore the only measurement of what a
+    plugin costs.
+
+    A plugin is a **de-optimisation boundary**: the compiler has no source for
+    its check and can only emit a call into it, so unrolling stops at its edge.
+    That is unavoidable — you cannot inline code you do not have — and the size
+    of it is a fact worth having rather than assuming.
+    """
+    try:
+        import numpy as np
+        import typing_validation.numpy  # noqa: F401
+        from numpy.typing import NDArray
+    except ImportError:  # pragma: no cover
+        return []
+    small = np.arange(20, dtype=np.uint8)
+    big = np.arange(10_000, dtype=np.uint8)
+    wrong = np.arange(20, dtype=np.float32)
+    matrix = np.zeros((100, 100), dtype=np.uint8)
+    return [
+        # The array's size is irrelevant to the work: dtype and shape are checked
+        # once, whatever the array holds. Two sizes, to say so out loud.
+        Case(
+            "NDArray[uint8] x20",
+            NDArray[np.uint8],
+            small,
+            wrong,
+            2,
+            v1_comparable=False,
+        ),
+        Case(
+            "NDArray[uint8] x10000",
+            NDArray[np.uint8],
+            big,
+            np.arange(10_000, dtype=np.float32),
+            2,
+            v1_comparable=False,
+        ),
+        Case(
+            "ndarray[(int, int), uint8]",
+            np.ndarray[tuple[int, int], np.dtype[np.uint8]],
+            matrix,
+            small,
+            3,
+            v1_comparable=False,
+        ),
+    ]
+
+
 def cases() -> list[Case]:
     """The corpus, covering the shapes that exercise different machinery."""
+    return _core_cases() + _numpy_cases()
+
+
+def _core_cases() -> list[Case]:
     return [
         # Scalars: where per-call overhead is the entire cost.
         Case("int", int, 12, "a", 1, lambda v: isinstance(v, int)),
@@ -223,6 +404,27 @@ def cases() -> list[Case]:
             Point(1, 2),
             Point("a", 2),  # type: ignore[arg-type]
             3,
+        ),
+        # Heavily shared sub-types: what the inlining budget trades against.
+        # Unrolling destroys sharing by construction, so one sub-type mentioned
+        # twenty times unrolls twenty times, and this is the only case that can
+        # say whether that matters.
+        Case(
+            "shared subtype x20",
+            SharedTwenty,
+            tuple(_shared_one() for _ in range(20)),
+            tuple(_shared_one() for _ in range(19)) + ({"a": ["x"]},),
+            20 * 13 + 1,
+        ),
+        # Wide, where inlining is the design's own worked example of a body
+        # exploding.
+        Case(
+            "TypedDict x40 fields",
+            Wide,
+            _wide(),
+            _wide() | {"f39": 39},
+            41,
+            _hand_wide,
         ),
         # Recursive aliases, where the compiled path must stop unrolling.
         Case(
