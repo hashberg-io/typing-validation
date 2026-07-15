@@ -13,6 +13,11 @@ Composed
 
 .. autodata:: typing_validation.composition.Composed
 
+Runner
+------
+
+.. autodata:: typing_validation.composition.Runner
+
 Stack
 -----
 
@@ -27,6 +32,11 @@ Validator
 ---------
 
 .. autodata:: typing_validation.composition.Validator
+
+runner_for
+----------
+
+.. autofunction:: typing_validation.composition.runner_for
 
 validator
 ---------

@@ -19,6 +19,7 @@ The following members were explicitly reexported using ``__all__``:
     - :py:obj:`typing_validation.composition.Validator`
     - :py:func:`typing_validation.inspection.can_validate`
     - :py:func:`typing_validation.inspection.clear_cache`
+    - :py:func:`typing_validation.emission.compiled_validator`
     - :py:func:`typing_validation.inspection.forget_type`
     - :py:func:`typing_validation.inspection.inspect_type`
     - :py:func:`typing_validation.validation.is_valid`

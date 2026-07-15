@@ -26,7 +26,7 @@ do not have.
 from collections.abc import Callable, Collection, Mapping
 from typing import Any, Literal, Union, get_args, get_origin
 
-from .composition import Validator, runner_for
+from .composition import Runner, Validator, runner_for
 from .diagnosis import diagnose
 from .errors import UnsupportedTypeError, ValidationError
 from .nodes import TypeForm, TypeNode, node_for
@@ -197,7 +197,7 @@ def _emit(node: TypeNode, /) -> _Emission:
     return out
 
 
-def _compile(node: TypeNode, /) -> Callable[[Any], bool]:
+def _compile(node: TypeNode, /) -> Runner:
     out = _emit(node)
     namespace: dict[str, Any] = dict(out.globals)
     exec(out.source, namespace)

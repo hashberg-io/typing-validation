@@ -16,6 +16,7 @@
         "typing_validation.composition": [
             "Check",
             "Composed",
+            "Runner",
             "Stack",
             "Unions",
             "Validator"

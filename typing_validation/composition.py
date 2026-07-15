@@ -36,6 +36,15 @@ from .plugins import registered_validator
 
 __all__ = ("Validator", "validator")
 
+type Runner = Callable[[Any], bool]
+"""
+A composed check with its driver attached, as a plain predicate.
+
+Named rather than written inline because the documentation pipeline cannot parse
+a ``Callable`` parameter list — see CLAUDE.md — and because naming it says what
+it is.
+"""
+
 type Validator = Callable[[Any], Literal[True]]
 """
 What :func:`validator` returns: the same contract as
@@ -168,7 +177,7 @@ def _backtrack(stack: Stack, unions: Unions, /) -> bool:
     return False
 
 
-def runner_for(node: TypeNode, /) -> Callable[[Any], bool]:
+def runner_for(node: TypeNode, /) -> Runner:
     """
     A node's composed check as a plain predicate, driver and all.
 
