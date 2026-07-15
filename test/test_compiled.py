@@ -25,7 +25,7 @@ from typing_validation import (
     validate,
     validator,
 )
-from typing_validation.emission import source_for
+from typing_validation.emission import _INLINE_BUDGET, source_for
 
 type JSON = int | str | bool | None | list[JSON] | dict[str, JSON]
 
@@ -122,7 +122,7 @@ class TestWhereUnrollingStops:
 
     def test_a_type_over_budget_becomes_a_call(self) -> None:
         wide: Any = int
-        for _ in range(50):
+        for _ in range(_INLINE_BUDGET + 10):
             wide = list[wide]
         assert "_call" in source_for(wide)
 
