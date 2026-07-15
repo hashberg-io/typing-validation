@@ -5,7 +5,7 @@ Validation for NumPy array types: ``NDArray[dtype]`` and
 ``ndarray[shape, dtype]``.
 
 **Import this module to enable it.** Without the import, NumPy array types raise
-:class:`~typing_validation.UnsupportedTypeError`, and the error says so::
+:class:`~typing_validation.errors.UnsupportedTypeError`, and the error says so::
 
     import typing_validation.numpy
 

@@ -28,7 +28,7 @@ class UnsupportedTypeError(NotImplementedError):
     though the ``int`` component is perfectly checkable.
 
     This is a :class:`NotImplementedError` rather than a validation failure: the
-    value was never in question. Use :func:`~typing_validation.can_validate` to
+    value was never in question. Use :func:`~typing_validation.inspection.can_validate` to
     ask in advance whether a type can be honoured at all.
     """
 

@@ -45,7 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uv sync --group docs
+      - run: uv sync --group docs --group dev
       # -W turns warnings into errors: a broken cross-reference is a broken
       # document, and Read the Docs runs sphinx directly without the generator,
       # so the generated pages must already be committed and current.
@@ -54,5 +54,11 @@ jobs:
           cd docs
           uv run --no-sync python make-api.py
           uv run --no-sync sphinx-build -M html . _build -W
+      # A clean build is not evidence the links work: a name in
+      # skip_missing_references renders as plain text and warns about nothing.
+      # This reads the built HTML, so it must run here, where the HTML exists —
+      # the test job has no docs and skips it.
+      - name: Check the cross-references are clickable
+        run: uv run --no-sync pytest test/test_docs.py
       - name: Check the generated API pages are committed and current
         run: git diff --exit-code -- docs/api docs/api-toc.rst

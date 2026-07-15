@@ -92,32 +92,30 @@ html_theme = "sphinx_rtd_theme"
 # so a file named "default.css" will overwrite the builtin "default.css".
 # html_static_path = ['_static']
 
-# Set of problematic references to ignore, i.e. not warn about when missing.
+# Names that will not resolve, and are rendered as plain, unclickable text.
+#
+# This is not a warning filter. An entry here is a link the project has given up
+# on, so it should feel expensive to add — the four package-level paths that used
+# to sit here made the whole cross-reference set dead while the build stayed
+# green.
 skip_missing_references: set[str] = {
-    # Re-exported at package level, but documented under the submodule that
-    # defines them. Docstrings name them the way users import them.
-    "typing_validation.validate",
-    "typing_validation.can_validate",
-    "typing_validation.inspect_type",
-    "typing_validation.UnsupportedTypeError",
-    # Type parameters of generic functions, which have no page of their own.
+    # A type parameter of a generic function, which has no page to link to.
     "T",
-    # Module-level aliases, rendered into signatures by autodoc before the
-    # objects they name have been registered.
-    "PluginCheck",
-    "PluginComponents",
-    "typing_validation.plugins.PluginComponents",
-    "ValidationFailure",
-    # Annotated under TYPE_CHECKING in the cache module, which sits below the
-    # node model and must not import it for real.
-    "TypeNode",
     # PEP 747, imported under TYPE_CHECKING so that the library keeps no runtime
-    # dependency. Resolves here once typing.TypeForm lands, expected in 3.15.
+    # dependency. Resolves here once typing.TypeForm lands, expected in 3.15,
+    # at which point this goes too.
     "TypeForm",
-    # typing.NewType is a class in 3.14, and the stdlib inventory does not carry
-    # it as the function the docstring naturally calls it.
-    "typing.NewType",
 }
+# Anything else that fails to resolve is a mistake, and belongs in one of:
+#   - the reference itself, when it names a path autodoc does not document. Write
+#     `~typing_validation.validation.validate`, not `~typing_validation.validate`:
+#     the second is how you import it, the first is where it is documented, and
+#     the leading `~` means both display as "validate".
+#   - `type_aliases` in make-api.json, when autodoc renders the name into a
+#     signature from an annotation. ValidationFailure, PluginCheck and
+#     PluginComponents resolve that way.
+#   - the role, when the target exists under a different one. typing.NewType is a
+#     py:class, so :func: could never have found it.
 
 # Set of descriptors to be documented as properties.
 property_descriptors: set[str] = set()

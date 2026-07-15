@@ -1,4 +1,5 @@
 {
     "PluginCheck": "typing_validation.plugins.PluginCheck",
-    "PluginComponents": "typing_validation.plugins.PluginComponents"
+    "PluginComponents": "typing_validation.plugins.PluginComponents",
+    "ValidationFailure": "typing_validation.diagnosis.ValidationFailure"
 }

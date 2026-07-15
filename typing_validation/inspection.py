@@ -53,7 +53,7 @@ def can_validate(t: Any, /) -> bool:
     because a validation that silently skipped part of its obligation would be
     worse than none. This function exists so a caller can ask up front.
 
-    Note that :func:`~typing_validation.validate` is *lazier* than this. It walks
+    Note that :func:`~typing_validation.validation.validate` is *lazier* than this. It walks
     the value and the type together and raises only when it reaches an
     unsupported component, so ``validate([], list[Callable[[int], int]])``
     returns :obj:`True` while this returns :obj:`False`. That is deliberate:

@@ -5,7 +5,15 @@
     "toc_filename": "api-toc.rst",
     "type_alias_dict_filename": "autodoc-type-aliases.json",
     "include_members": {},
-    "type_aliases": {},
+    "type_aliases": {
+        "typing_validation.plugins": [
+            "PluginCheck",
+            "PluginComponents"
+        ],
+        "typing_validation.diagnosis": [
+            "ValidationFailure"
+        ]
+    },
     "exclude_members": {},
     "include_modules": [],
     "exclude_modules": [

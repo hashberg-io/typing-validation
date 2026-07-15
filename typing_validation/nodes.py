@@ -4,9 +4,9 @@
 The node model: one interned node per distinct type, holding the type it was
 built from, its form, its interned children, and its memoised properties.
 
-Everything except :func:`~typing_validation.validate` is built on this one
+Everything except :func:`~typing_validation.validation.validate` is built on this one
 class. It is simultaneously the unit of interning, the thing
-:func:`~typing_validation.inspect_type` reports, and the thing that explains a
+:func:`~typing_validation.inspection.inspect_type` reports, and the thing that explains a
 failure. It can be all of those at once precisely because none of them is on a
 hot path — which is also why this module may share freely with them, and why it
 shares nothing with the interpreter.
@@ -126,7 +126,7 @@ class TypeForm(enum.Enum):
     """:obj:`~typing.Annotated`, validated as the type it wraps."""
 
     NEW_TYPE = "NewType"
-    """A :func:`~typing.NewType`, validated as its supertype."""
+    """A :class:`~typing.NewType`, validated as its supertype."""
 
     ITERATOR = "iterator"
     """An iterator, whose items cannot be checked without consuming it."""

@@ -12,8 +12,8 @@ Resolving those is this module's job.
 :func:`~typing.get_type_hints` does it too, and is rejected for one decisive
 reason: it is all-or-nothing. A single unresolvable field raises
 :class:`NameError` for the whole class, and that error escapes from inside
-:func:`~typing_validation.validate` as neither a validation failure nor an
-:class:`~typing_validation.UnsupportedTypeError` — just a stray exception from a
+:func:`~typing_validation.validation.validate` as neither a validation failure nor an
+:class:`~typing_validation.errors.UnsupportedTypeError` — just a stray exception from a
 library the caller did not know was evaluating anything. Resolving field by
 field turns that opaque crash into a precise report, and lets the unresolvable
 field poison only the type that contains it.
