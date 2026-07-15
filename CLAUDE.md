@@ -41,6 +41,10 @@ Each gets a sub-branch off `main`, carries the tests that cover it, and is merge
 
 The resolution: **depth grows only at container boundaries.** A leaf check cannot descend, so a container calls its leaf children *directly* — free and safe — and pushes only children that can themselves descend. Measured at 2.9× `validate` on `list[int]`, while surviving a value nested twenty thousand deep.
 
+## Owed, at the end of 2.2
+
+- **How the benchmarks are presented.** With all three mechanisms in place the suite finally has something to compare, and printing it to a terminal stops being enough. Wanted: a **table artefact committed to the repo** — the numbers, the break-even points, and the captured environment, in a form a reader can consult without running anything. Raise it as its own round once `compiled_validator` lands; §11 says results are tracked over time rather than gated in CI, and this is what "tracked" should mean.
+
 ## Waiting on Python 3.15
 
 - **`typing.TypeForm` replaces the `typing_extensions` import.** PEP 747 is already adopted: `validated` takes `TypeForm[T]`, imported under `TYPE_CHECKING` so the library keeps zero runtime dependencies (typeshed carries the stub, so mypy needs nothing installed, and the docs read annotations as strings). The one cost is that `get_type_hints` on those functions raises `NameError` until the name exists at runtime. `test_typeform.py` fails deliberately when `typing.TypeForm` appears, and says what to change.
