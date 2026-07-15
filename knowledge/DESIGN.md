@@ -333,3 +333,56 @@ There is one pathological case worth naming: a validator fails, `diagnose` re-wa
 That is a library bug — a mechanism has drifted from the catalogue — and it must be reported as one. `diagnose` must never respond to a reported failure with an implicit "actually, it's fine": the failure is not swallowed, and no `TypeError` is silently downgraded to success. It raises an internal error saying that validation failed but diagnosis could not reproduce it, and asks for a report.
 
 This is exactly the drift §10 exists to prevent, and the reason the conformance suite is load-bearing rather than decorative.
+
+## 6. Type resolution
+
+Some forms carry their component types in *annotations* rather than in `__args__`: `TypedDict` fields, `NamedTuple` fields. Reading those annotations is its own problem in 3.14, because PEP 649 made annotations lazily evaluated.
+
+### `get_type_hints` is rejected
+
+v1 used `get_type_hints`. It is the wrong tool, for one decisive reason: **it is all-or-nothing**. A single unresolvable field raises `NameError` for the whole class, and that `NameError` escapes from inside `validate` — neither a validation failure nor an `UnsupportedTypeError`, just a stray exception from a library the caller did not know was evaluating anything.
+
+`annotationlib.get_annotations(t, format=FORWARDREF)` instead returns the unresolvable field as a `ForwardRef` object carrying its module. That turns an opaque crash into a precise report: *field `nested` of `TD` refers to unresolved name `Later`*. It also composes with totality — the unresolvable field poisons the `TypedDict`, and `inspect_type` points at the culprit.
+
+### The cost we inherit
+
+`get_type_hints` strips `Required`, `NotRequired` and `ReadOnly` for us. `annotationlib` does not:
+
+```python
+get_type_hints(TD)                        # {'a': int, 'b': str,             'c': bytes}
+get_annotations(TD, format=VALUE)         # {'a': int, 'b': NotRequired[str], 'c': ReadOnly[bytes]}
+```
+
+So v2 strips the three qualifiers itself. This is new work, inherited by choosing the better resolution path — the observable behaviour is unchanged, but the obligation is real, and it is worth being clear that the `annotationlib` switch is not a pure win.
+
+Requiredness is *not* re-derived from the qualifiers. It comes from `__required_keys__` and `__optional_keys__`, which the class computes for us and which remain correct under inheritance and `total=False`. The qualifiers in the annotation are redundant with those, so they are simply stripped. `ReadOnly` has no runtime meaning at all and is stripped for the same reason; `__readonly_keys__` is reported by `inspect_type` but never affects a verdict.
+
+### Two reading paths, on the hot/construction line
+
+Annotation access has two very different costs, and they fall either side of §3.1:
+
+| Path | Cost | Used by |
+|---|---|---|
+| `t.__annotations__` | ~20 ns — PEP 649 caches the computed dict on the class | `validate` |
+| `get_annotations(t, FORWARDREF)` | ~225 ns — recomputed per call | node construction (§4) |
+
+`validate` reads the cached attribute, because paying 225 ns per call to re-derive a class's fields would be exactly the sort of overhead §3.1 exists to eliminate. Node construction pays the full price once, in exchange for the richer forward-reference handling, and never pays it again.
+
+Both see the same content for the forms we read annotations from, which is what keeps the mechanisms conformant.
+
+**One honest asymmetry.** Where a field is still an unresolved `ForwardRef`, `validate` must resolve it per call, since it caches nothing by construction. `validator(t)` resolves it once at construction and never again. That is a real cost difference on a real case — and it is precisely the difference `validator` exists to sell.
+
+### Forward references
+
+**A forward reference is resolvable iff it came from an annotation**, because that is what records a module to resolve against.
+
+```python
+ForwardRef('Later', module='mymod')   # from an annotation — resolvable
+ForwardRef('JSON')                    # written inline    — no module, not resolvable
+```
+
+The two inline spellings do not even agree with each other: `list["JSON"]` stores the bare string `'JSON'`, while `typing.List["JSON"]` stores a module-less `ForwardRef`. Neither can be resolved, and both are unsupported.
+
+**`validation_aliases` is removed.** It existed to paper over exactly this case, and the reason it cannot survive is structural rather than aesthetic: the only way to resolve an inline reference is against the caller's frame, which §4.1 forbids outright — an interned node for `list["JSON"]` would mean different things depending on which caller built it first, making interning observable. It is also incoherent for `validator(t)`, which is called from somewhere entirely unrelated to where `t` was written.
+
+**PEP 695 absorbs the use case.** `type JSON = int | str | list[JSON]` is lazily evaluated, resolves against its defining module, needs no help from the caller, and is the recursion root the graph wants anyway (§4.2). The error message for an inline reference says so.
