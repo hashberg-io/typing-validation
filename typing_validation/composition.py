@@ -84,7 +84,18 @@ def validator(t: Any, /) -> Callable[[Any], Literal[True]]:
     if not node.supported:
         culprits = node.unsupported_components()
         raise UnsupportedTypeError(t, culprits[0].reason if culprits else None)
-    check, _ = _composed(node)
+    check, can_push = _composed(node)
+    if not can_push:
+        # A check that cannot descend needs no stack to descend with, and
+        # allocating two lists to hold nothing is the whole cost at this size.
+        # This is the shape for int, str, Literal, int | None and every other
+        # type that answers from the value alone.
+        def run_flat(val: Any) -> Literal[True]:
+            if check(val, _NO_STACK, _NO_UNIONS):
+                return True
+            raise ValidationError(val, t, diagnose(val, t))
+
+        return run_flat
 
     def run(val: Any) -> Literal[True]:
         if _drive(val, check):
@@ -92,6 +103,17 @@ def validator(t: Any, /) -> Callable[[Any], Literal[True]]:
         raise ValidationError(val, t, diagnose(val, t))
 
     return run
+
+
+_NO_STACK: Stack = []
+_NO_UNIONS: Unions = []
+"""
+Handed to a check that cannot descend, and therefore cannot touch them.
+
+Shared and permanently empty: a check that pushed to these would be a bug the
+call-versus-push rule exists to make impossible, and a fresh pair per call would
+be two allocations for nothing.
+"""
 
 
 def _drive(val: Any, root: Check, /) -> bool:
