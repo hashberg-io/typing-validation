@@ -22,6 +22,17 @@ import pytest
 
 ROOT = pathlib.Path(__file__).parent.parent
 
+BUILT = ROOT / "docs" / "_build" / "html" / "api"
+
+if not BUILT.is_dir():
+    # Skipped here rather than inside the parametrisation below, which pytest
+    # evaluates while *collecting* and where a skip aborts the whole run. These
+    # need built HTML, so they run in the docs job; the test job has none.
+    pytest.skip(
+        "docs not built; run `cd docs && python make-api.py && make html`",
+        allow_module_level=True,
+    )
+
 XREF = re.compile(
     r'(<a class="reference (?:internal|external)"[^>]*>)?'
     r'<code class="[^"]*xref[^"]*"[^>]*><span class="pre">([A-Za-z_][\w.]*)</span>'
@@ -36,12 +47,7 @@ ALLOWED_DEAD = {
 
 
 def _pages() -> list[pathlib.Path]:
-    built = ROOT / "docs" / "_build" / "html" / "api"
-    if not built.is_dir():
-        pytest.skip(
-            "docs not built; run `cd docs && python make-api.py && make html`"
-        )
-    return sorted(built.glob("*.html"))
+    return sorted(BUILT.glob("*.html"))
 
 
 @pytest.mark.parametrize("page", _pages(), ids=lambda p: p.stem)
