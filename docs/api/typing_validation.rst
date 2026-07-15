@@ -8,10 +8,14 @@ typing_validation.__all__
 
 The following members were explicitly reexported using ``__all__``:
 
+    - :py:class:`typing_validation.diagnosis.Detail`
+    - :py:class:`typing_validation.diagnosis.Location`
+    - :py:class:`typing_validation.diagnosis.Place`
     - :py:class:`typing_validation.nodes.TypeForm`
     - :py:class:`typing_validation.nodes.TypeNode`
     - :py:class:`typing_validation.errors.UnsupportedTypeError`
     - :py:class:`typing_validation.errors.ValidationError`
+    - :py:class:`typing_validation.diagnosis.ValidationFailure`
     - :py:func:`typing_validation.inspection.can_validate`
     - :py:func:`typing_validation.inspection.clear_cache`
     - :py:func:`typing_validation.inspection.forget_type`
