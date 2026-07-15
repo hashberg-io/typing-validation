@@ -34,7 +34,14 @@ from .errors import UnsupportedTypeError, ValidationError
 from .nodes import TypeForm, TypeNode, node_for
 from .plugins import registered_validator
 
-__all__ = ("validator",)
+__all__ = ("Validator", "validator")
+
+type Validator = Callable[[Any], Literal[True]]
+"""
+What :func:`validator` returns: the same contract as
+:func:`~typing_validation.validation.validate`, minus the type, which it already
+knows.
+"""
 
 type Stack = list[tuple[Any, "Check"]]
 type Unions = list[list[Any]]
@@ -59,7 +66,7 @@ descend than ``int`` can.
 """
 
 
-def validator(t: Any, /) -> Callable[[Any], Literal[True]]:
+def validator(t: Any, /) -> Validator:
     """
     A validation function specialised to one type.
 

@@ -12,6 +12,13 @@
         ],
         "typing_validation.diagnosis": [
             "ValidationFailure"
+        ],
+        "typing_validation.composition": [
+            "Check",
+            "Composed",
+            "Stack",
+            "Unions",
+            "Validator"
         ]
     },
     "exclude_members": {},

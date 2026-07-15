@@ -2,7 +2,7 @@
 
 """Runtime validation using type hints."""
 
-from .composition import validator
+from .composition import Validator, validator
 from .diagnosis import Detail, Location, Place, ValidationFailure
 from .errors import UnsupportedTypeError, ValidationError
 from .inspection import (
@@ -16,10 +16,11 @@ from .nodes import TypeForm, TypeNode
 from .plugins import register_validator
 from .validation import is_valid, validate, validated, validated_iter
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 __all__ = (
     "Detail",
+    "Validator",
     "Location",
     "Place",
     "TypeForm",

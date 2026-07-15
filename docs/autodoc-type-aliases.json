@@ -1,5 +1,10 @@
 {
     "PluginCheck": "typing_validation.plugins.PluginCheck",
     "PluginComponents": "typing_validation.plugins.PluginComponents",
-    "ValidationFailure": "typing_validation.diagnosis.ValidationFailure"
+    "ValidationFailure": "typing_validation.diagnosis.ValidationFailure",
+    "Check": "typing_validation.composition.Check",
+    "Composed": "typing_validation.composition.Composed",
+    "Stack": "typing_validation.composition.Stack",
+    "Unions": "typing_validation.composition.Unions",
+    "Validator": "typing_validation.composition.Validator"
 }
