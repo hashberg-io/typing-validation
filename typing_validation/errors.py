@@ -9,7 +9,10 @@ The two errors answer different questions — *"I cannot check this"* versus
 never be able to mistake one for the other.
 """
 
-from typing import Any, Self, final
+from typing import TYPE_CHECKING, Any, Self, final
+
+if TYPE_CHECKING:
+    from .diagnosis import ValidationFailure
 
 __all__ = ("UnsupportedTypeError", "ValidationError")
 
@@ -75,9 +78,14 @@ class ValidationError(TypeError):
     the library rejected a value, rather than merely that something somewhere
     raised a :class:`TypeError` — a distinction that hid a real crash in v1 for
     eleven releases.
+
+    The structured explanation hangs off :attr:`failure`, as a proper attribute
+    rather than v1's ``setattr(error, "validation_failure", …)`` smuggling.
+    Programmatic access is then an attribute on an exception you have already
+    caught, which is what ``get_validation_failure`` existed to provide.
     """
 
-    __slots__ = ("_val", "_t")
+    __slots__ = ("_val", "_t", "_failure")
 
     _val: Any
     """The value that failed validation."""
@@ -85,15 +93,32 @@ class ValidationError(TypeError):
     _t: Any
     """The type the value was validated against."""
 
-    def __new__(cls, val: Any, t: Any, /) -> Self:
+    _failure: "ValidationFailure | None"
+    """The structured explanation, when one was built."""
+
+    def __new__(
+        cls, val: Any, t: Any, failure: "ValidationFailure | None" = None, /
+    ) -> Self:
         """
         :param val: the value that failed validation.
         :param t: the type it was validated against.
+        :param failure: the structured explanation, if one was built.
         """
-        self: Self = TypeError.__new__(cls, val, t)
+        self: Self = TypeError.__new__(cls, val, t, failure)
         self._val = val
         self._t = t
+        self._failure = failure
         return self
+
+    @property
+    def failure(self) -> "ValidationFailure | None":
+        """
+        The structured explanation of what went wrong, and where.
+
+        :obj:`None` when nothing built one — ``validated_iter`` reports the item
+        it stopped at without diagnosing the whole iterable.
+        """
+        return self._failure
 
     @property
     def val(self) -> Any:
@@ -106,4 +131,6 @@ class ValidationError(TypeError):
         return self._t
 
     def __str__(self) -> str:
+        if self._failure is not None:
+            return str(self._failure)
         return f"For type {self._t!r}, invalid value: {self._val!r}"
