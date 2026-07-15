@@ -41,6 +41,23 @@ Each gets a sub-branch off `main`, carries the tests that cover it, and is merge
 
 **Depth grows only where a check can descend.** So a container *calls* the children that cannot and *pushes* the ones that can: 2.75× `validate`, surviving twenty thousand levels. "Can descend" belongs to the *check*, not to the node's children — a union of plain classes has members and still collapses to one `isinstance`.
 
+### 2.2 milestones
+
+Each gets a sub-branch off `main`, carries the tests that cover it, and is merged only once they pass.
+
+| # | Milestone | Branch | Contents | Status |
+|---|---|---|---|---|
+| 1 | Benchmark coverage | `compiled-benchmarks` | The cases that will judge the emitter, **before** it exists: heavily-shared types, which are what the inlining budget trades against and which nothing currently stresses; a NumPy case, since a plugin is a de-optimisation boundary and the only way to know its cost is to measure it; deep and recursive shapes | not started |
+| 2 | The emitter | `compiled-validator` | Source emission, `exec`, one function per recursion root, a call at every plugin. Added to `MECHANISMS` | not started |
+| 3 | The inlining budget | `inlining-budget` | Tuned against milestone 1's data, not against argument | not started |
+| 4 | Release polish | `compiled-docs` | README, guide, `DESIGN.md`, the 2.2 release — and the benchmark table, **discussed before it is executed** | not started |
+
+**The emitted shape, decided:** nested loops where the *type* bounds the depth, a stack at cycles.
+
+This is the same fork 2.1 faced, one level up, and the same answer. It rests on an observation that only holds for emitted code: **for an acyclic type, the value can only nest as deep as the type says**, so fully-unrolled nested loops cannot recurse at all — `list[int]` against a value nested twenty thousand deep fails its `isinstance` at level two and never descends. Depth becomes unbounded only through a cycle, which is exactly where a back-edge must push instead of call.
+
+So an acyclic type should reach hand-written speed (11.8 ns/node on `list[int]`, against `validator`'s 22.6), and a recursive one pays for a driver. Whether the first half of that holds is the bet 2.2 is making, and milestone 1 exists to judge it.
+
 ## Owed, at the end of 2.2
 
 - **How the benchmarks are presented.** With all three mechanisms in place the suite finally has something to compare, and printing it to a terminal stops being enough. Wanted: a **table artefact committed to the repo** — the numbers, the break-even points, and the captured environment, in a form a reader can consult without running anything. Raise it as its own round once `compiled_validator` lands; §11 says results are tracked over time rather than gated in CI, and this is what "tracked" should mean.
