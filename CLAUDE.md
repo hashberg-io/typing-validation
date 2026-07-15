@@ -18,7 +18,7 @@ Keep them that way.
 
 | Release | Contents | Status |
 |---|---|---|
-| **2.0** | `validate` and everything around it — the interpreter, node model, failure model, resolution, plugins, config | design done, not implemented |
+| **2.0** | `validate` and everything around it — the interpreter, node model, failure model, resolution, plugins | **implemented**; `diagnose` message format still owed |
 | **2.1** | `validator` — closure composition | not started |
 | **2.2** | `compiled_validator` — codegen via `exec` | not started |
 | later | marshalling — persistent bytecode cache | blocked on an unsolved staleness problem (DESIGN.md §14) |
@@ -40,7 +40,7 @@ Each gets a sub-branch off `v2`, carries the tests that cover it, and is merged 
 | 5 | Diagnosis | `diagnose` | the failure tree and the second traversal (§3.6, §5); **messages stubbed** pending the deferred format round | done |
 | 6 | The NumPy plugin | `numpy-plugin` | `typing_validation.numpy` (§7) | done |
 | 7 | Benchmarks | `benchmarks` | the suite of §11, including the comparison against v1 | done |
-| 8 | Release polish | `release-polish` | README usage, API docs, CI | not started |
+| 8 | Release polish | `release-polish` | README usage, API docs, CI | done |
 
 The ordering is not arbitrary. `validate` (3) lands before the node model (4) because §3.1 makes it genuinely independent of it — which then gives `can_validate` an oracle: a validator raises `UnsupportedTypeError` exactly when `can_validate` is `False`. `diagnose` (5) follows the node model because §4 makes it a method on the node.
 

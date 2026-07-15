@@ -581,16 +581,26 @@ inspect_type(t, /) -> TypeNode                              # §3.5
 can_validate(t, /) -> bool
 
 # extend
-register_validator(cls, ...)                                # §7
-# plus the __validate__ classmethod protocol
+register_validator(cls, check, components=None)             # §7
+# plus the __validate__ / __validate_components__ classmethods
 
 # errors
 UnsupportedTypeError(NotImplementedError)
-ValidationError(TypeError)                                  # carries the failure tree
+ValidationError(TypeError)                                  # .failure is the tree
+
+# read a failure
+ValidationFailure                                           # val, t, detail, location, causes
+Detail, Place, Location                                     # §3.6
 
 # manage the cache
-# clear, forget a type, scoped caching context manager      # §4.3
+clear_cache()                                               # §4.3
+forget_type(t) -> bool
+scoped_cache()                                              # context manager
 ```
+
+`TypeForm` and `TypeNode` are exported too, being what `inspect_type` returns.
+
+`diagnose` itself is **not** exported. It is reached by catching a `ValidationError` and reading `.failure`, which is the only context in which its answer means anything — and, as §5 notes, the one place it must never be asked about a value that is actually valid.
 
 Arguments are **positional-only**. `val` and `t` are poor names to be permanently bound to, and nobody passes them by keyword.
 

@@ -2,6 +2,7 @@
 
 """Runtime validation using type hints."""
 
+from .diagnosis import Detail, Location, Place, ValidationFailure
 from .errors import UnsupportedTypeError, ValidationError
 from .inspection import (
     can_validate,
@@ -17,10 +18,14 @@ from .validation import is_valid, validate, validated, validated_iter
 __version__ = "2.0.0"
 
 __all__ = (
+    "Detail",
+    "Location",
+    "Place",
     "TypeForm",
     "TypeNode",
     "UnsupportedTypeError",
     "ValidationError",
+    "ValidationFailure",
     "can_validate",
     "clear_cache",
     "forget_type",

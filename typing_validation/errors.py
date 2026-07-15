@@ -79,7 +79,7 @@ class ValidationError(TypeError):
     raised a :class:`TypeError` — a distinction that hid a real crash in v1 for
     eleven releases.
 
-    The structured explanation hangs off :attr:`failure`, as a proper attribute
+    The structured explanation hangs off :attr:`~typing_validation.errors.ValidationError.failure`, as a proper attribute
     rather than v1's ``setattr(error, "validation_failure", …)`` smuggling.
     Programmatic access is then an attribute on an exception you have already
     caught, which is what ``get_validation_failure`` existed to provide.
