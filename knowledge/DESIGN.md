@@ -713,15 +713,20 @@ The **hard part is unsolved, and it is why this is last.** Staleness. What inval
 
 Deferring is not procrastination. Stage 3 is the oracle: a marshalled validator must behave identically to a freshly-compiled one, and that test cannot be written until freshly-compiled ones are known to be right.
 
-### On release boundaries
+### Release boundaries
 
-Staging is implementation order, not a release plan, but they interact.
+The stages *are* the releases:
 
-Stage 1 alone is shippable, and there is a case for shipping it *as* 2.0: it carries every breaking change — the API removals of §9, the corrections in [TYPES.md](TYPES.md), the 3.14 floor — while stages 2 to 4 are purely additive and fit comfortably in 2.1 and 2.2 under semantic versioning. That gets the breaking changes in front of users once, early, rather than holding them behind work whose schedule is unknown, and it means the marshalling problem above does not block anything.
+| Release | Contents |
+|---|---|
+| **2.0** | Stage 1 — `validate` and everything around it |
+| **2.1** | Stage 2 — `validator` |
+| **2.2** | Stage 3 — `compiled_validator` |
+| later | Stage 4 — marshalling |
 
-The counter-argument is that `validator` and `compiled_validator` are the *reason* for the rewrite, and a 2.0 without them is a modernisation wearing a major version.
+**Every breaking change lands in 2.0**: the API removals of §9, the corrections in [TYPES.md](TYPES.md), the 3.14 floor. Stages 2 and 3 are purely additive and fit under semantic versioning without a further major bump, so users absorb the breaks once, early, rather than waiting behind work whose schedule is unknown. The unsolved staleness problem then blocks no release at all.
 
-This is a decision to take deliberately rather than by drift. See §14.
+Aligning the two boundaries also keeps each release honest: one release is exactly one mechanism, conformance-tested against its predecessors and benchmarked against the baseline that justifies its existence. A release that cannot demonstrate it earns its complexity does not ship.
 
 ## 13. Assumptions and non-goals
 
@@ -765,7 +770,7 @@ Part of the contract, not a preference — §8 shows what happens when a library
 
 ### The `diagnose` message format
 
-**Deliberately unsettled, and owed a round of its own.**
+**Deliberately unsettled, and owed a round of its own — deferred until the end of the 2.0 implementation.**
 
 The nested failure messages are the library's most-loved feature, so the format deserves a decision rather than an inherited default. v1's explicit style is the starting point:
 
@@ -783,12 +788,6 @@ The cost of settling this is low and the cost of relitigating it is high, becaus
 **The hardest problem left in the design, and the reason §12 puts marshalling last.**
 
 There is no answer yet — only the requirement that a stale entry must be *detected*, never trusted, because a silently-wrong cached validator is the worst failure this library could have. §13's "types are immutable once used" is the same question in an easier setting, and the two probably want one idea.
-
-### What ships as 2.0
-
-Stage 1 alone is a complete library carrying every breaking change, with stages 2 to 4 purely additive and semver-compatible in later releases. Shipping it as 2.0 gets the breaks in front of users once and early, and stops the unsolved marshalling problem from blocking anything.
-
-Against: `validator` and `compiled_validator` are the reason for the rewrite, and a 2.0 without them is a modernisation wearing a major version.
 
 ### The inlining budget
 
