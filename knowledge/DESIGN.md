@@ -670,3 +670,55 @@ Fixed seeds. Captured environment — Python build, machine, versions — becaus
 ### The number that matters most
 
 **`validate` must not be slower than v1.** It is the function that everybody calls and most people will only ever call. If the redesign buys two new mechanisms at the cost of making the common path slower, it has failed, regardless of what the other two achieve. That comparison is the first benchmark to exist and the last one allowed to regress.
+
+## 12. Implementation staging
+
+Four stages, strictly ordered. **Each stage manufactures the oracle for the next** — which is the whole reason the order is not negotiable.
+
+### Stage 1 — the interpreter
+
+The node model (§4), `validate` (§3.2), the failure model (§5), `diagnose`, `inspect_type`, `can_validate`, `is_valid`, `validated`, `validated_iter`, type resolution (§6), the plugin boundary with the NumPy plugin (§7), and configuration (§8).
+
+Plus the conformance harness (§10) with one mechanism on its axis, and the benchmark comparison against v1 (§11).
+
+This stage is **already a complete library**: v1's surface, modernised, with the defects in [TYPES.md](TYPES.md) fixed. Nothing after it is required for the library to be useful — the later stages are performance, offered to callers who ask.
+
+The plugin boundary belongs here rather than later, despite being new. It is architectural, not a feature: deciding it afterwards would mean either welding NumPy into the core permanently or extracting it via a breaking change. And it costs little now, because §7's hook point already exists.
+
+### Stage 2 — `validator`
+
+Closure composition over the node graph (§3.3), and late binding at back-edges.
+
+The node graph already exists from stage 1, since `inspect_type` and `diagnose` need it. This stage adds a method to it.
+
+`validate` is the oracle: every case in the corpus must reach the same verdict through both. This is the moment the mechanism axis (§10) earns its design — adding `validator` to the suite is adding one entry to a list.
+
+### Stage 3 — `compiled_validator`
+
+Source emission, `exec`, the inlining budget, one function per recursion root (§3.4).
+
+Both `validate` and `validator` are oracles. Two independent implementations already agree; a third must join them.
+
+This is where the design is most likely to be wrong, because the inlining budget is a real compiler decision made on guesses. §11's hand-written baseline and break-even numbers are what turn those guesses into evidence.
+
+### Stage 4 — marshalling
+
+A persistent cache for stage 3's output, so that compile latency is paid once across processes rather than once per process.
+
+The **mechanism** is settled. `marshal` handles code objects, but `co_consts` admits only `None`, `bool`, `int`, `float`, `complex`, `str`, `bytes`, `tuple`, `frozenset`, `code` and `Ellipsis`. A type — `int`, a user class, an enum member inside a `Literal` — can never be a constant; in generated source it compiles to a `LOAD_GLOBAL` resolved against the globals handed to `exec`. So the persisted artifact is two parts: **the marshalled code, plus a recipe for rebuilding its environment** — a mapping from generated names to either inline marshalable constants or resolvable references like `module:qualname`.
+
+This is convenient given §3.4 already emits a *set* of mutually-referencing functions rather than one: each is separately a code object, and the recipe maps names to them, cycles included.
+
+The **hard part is unsolved, and it is why this is last.** Staleness. What invalidates a cached validator for `list[MyClass]`? The class's identity does not survive across processes. Its `__mro__` may have changed since the bytecode was written. After a refactor, a *different* class can hold the same qualified name — and then the cached validator is silently wrong, which is the worst failure mode this library has. `__pycache__` solves the analogous problem with source path, mtime and size; our inputs are not files, so that answer does not transfer. There is no design here yet, only a requirement: **a stale entry must be detected, never trusted.**
+
+Deferring is not procrastination. Stage 3 is the oracle: a marshalled validator must behave identically to a freshly-compiled one, and that test cannot be written until freshly-compiled ones are known to be right.
+
+### On release boundaries
+
+Staging is implementation order, not a release plan, but they interact.
+
+Stage 1 alone is shippable, and there is a case for shipping it *as* 2.0: it carries every breaking change — the API removals of §9, the corrections in [TYPES.md](TYPES.md), the 3.14 floor — while stages 2 to 4 are purely additive and fit comfortably in 2.1 and 2.2 under semantic versioning. That gets the breaking changes in front of users once, early, rather than holding them behind work whose schedule is unknown, and it means the marshalling problem above does not block anything.
+
+The counter-argument is that `validator` and `compiled_validator` are the *reason* for the rewrite, and a 2.0 without them is a modernisation wearing a major version.
+
+This is a decision to take deliberately rather than by drift. See §14.
