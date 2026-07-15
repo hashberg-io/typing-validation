@@ -16,8 +16,19 @@ import tempfile
 from pathlib import Path
 from types import ModuleType
 
-_V1_REF = "main"
-"""Where v1 lives. The trunk still holds 1.2.11."""
+_V1_REF = "v1.2.12"
+"""
+Where v1 lives: the last v1 release, by tag.
+
+A tag rather than a branch, and that is the whole point. This read `main` while
+the trunk still held v1 — and the day v2 merges to the trunk, that would have
+compared v2 against itself and reported no regression, for ever, without a
+symptom. The one number the design says may never regress would have been
+measuring nothing.
+
+Note that v1.2.12's own ``__version__`` says 1.2.11: it was tagged without the
+bump. The code is the 1.2.12 release; only its self-report is stale.
+"""
 
 
 def load_v1() -> ModuleType | None:
