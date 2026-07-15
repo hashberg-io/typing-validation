@@ -8,7 +8,10 @@
     "type_aliases": {},
     "exclude_members": {},
     "include_modules": [],
-    "exclude_modules": [],
+    "exclude_modules": [
+        "typing_validation._cache",
+        "typing_validation._resolution"
+    ],
     "member_fullnames": {},
     "special_class_members": {}
 }

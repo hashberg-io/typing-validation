@@ -59,7 +59,7 @@ from .plugins import (
     registered_validator,
     unsupported_explanation,
 )
-from .resolution import resolve, strip_qualifiers
+from ._resolution import resolve, strip_qualifiers
 
 __all__ = ("is_valid", "validate", "validated", "validated_iter")
 
@@ -160,9 +160,8 @@ def is_valid(val: Any, t: Any, /) -> bool:
     Whether a value is valid for a type.
 
     This does **not** build an explanation, because a caller who wanted one
-    would have called :func:`validate` and caught the exception. v1 built the
-    failure tree here, which made every miss pay for diagnostics nobody had
-    asked for. A caller who wants a boolean gets a boolean at boolean prices.
+    would have called :func:`validate` and caught the exception. Asking for a
+    boolean gets you a boolean at boolean prices.
 
     :raises UnsupportedTypeError: if the type, or any component of it, is not
         one this library can validate against. An unsupported type is not an
@@ -264,6 +263,22 @@ def _check(val: Any, t: Any, /) -> bool:
             # subclasses. The overwhelmingly common case, and the only arm that
             # reaches isinstance without a single function call before it.
             if isinstance(val, t):
+                # Both halves of this test are load-bearing, and neither alone
+                # would do. `_fields` alone is not enough: 133 classes in `ast`
+                # carry one, and none is a tuple, so `val[i]` below would raise
+                # "object is not subscriptable" on every AST node. `tuple` alone
+                # is not enough either: os.stat_result, time.struct_time and
+                # sys.version_info are all tuple subclasses with no field names
+                # to check. A named tuple is, as far as the runtime is concerned,
+                # exactly the conjunction — the only construct that is both
+                # positionally addressable and carries field names.
+                #
+                # If some future class satisfies both without being a named
+                # tuple, it will be validated as one. That is the same
+                # indistinguishability TYPES.md already records for a
+                # hand-written tuple subclass defining `_fields`: there is no
+                # nominal marker to check, because typing.NamedTuple is a
+                # function and never appears in an __mro__.
                 if not issubclass(t, tuple):
                     continue
                 fields = getattr(t, "_fields", None)
@@ -282,7 +297,6 @@ def _check(val: Any, t: Any, /) -> bool:
                             )
                     stack.append((val[i], ann))
                 continue
-
         else:
             if tt is GenericAlias:
                 origin = t.__origin__
@@ -305,7 +319,6 @@ def _check(val: Any, t: Any, /) -> bool:
                         continue
                 elif _check_bare(val, t, tt, stack):
                     continue
-
             elif origin is Union:
                 # Members that are plain classes collapse to a single isinstance
                 # against the argument tuple, which __args__ already is. That
@@ -329,7 +342,6 @@ def _check(val: Any, t: Any, /) -> bool:
                     unions.append([val, args, len(stack), 1])
                     stack.append((val, args[0]))
                     continue
-
             elif origin in _ITEM_ORIGINS:
                 if isinstance(val, origin):
                     if not args:
@@ -338,7 +350,6 @@ def _check(val: Any, t: Any, /) -> bool:
                     for item in val:
                         stack.append((item, item_t))
                     continue
-
             elif origin in _MAPPING_ORIGINS:
                 if isinstance(val, origin):
                     if not args:
@@ -348,7 +359,6 @@ def _check(val: Any, t: Any, /) -> bool:
                         stack.append((key, key_t))
                         stack.append((value, value_t))
                     continue
-
             elif origin is tuple:
                 if isinstance(val, tuple):
                     if not args:
@@ -367,7 +377,6 @@ def _check(val: Any, t: Any, /) -> bool:
                         for item, item_t in zip(val, args):
                             stack.append((item, item_t))
                         continue
-
             elif origin is Literal:
                 # Matched by type *and* equality, or by identity for enum members
                 # and None. v1 tested `val in t.__args__`, which is bare ==, so
@@ -383,23 +392,19 @@ def _check(val: Any, t: Any, /) -> bool:
                         break
                 if matched:
                     continue
-
             elif origin is Annotated:
                 # Not stripped: Annotated[int, Ge(0)] is a distinct type from
                 # int, with its own identity, and failures report it as written.
                 stack.append((val, t.__origin__))
                 continue
-
             elif origin is type:
                 if _check_type_of(val, t, args):
                     continue
-
             elif origin in _ITERATOR_ORIGINS:
                 # The item type is uncheckable without consuming the value, and
                 # purity forbids that. validated_iter is the honest route.
                 if isinstance(val, Iterator):
                     continue
-
             elif origin in _MAYBE_ITEM_ORIGINS:
                 if isinstance(val, origin):
                     if not args or not isinstance(val, Collection):
@@ -410,24 +415,19 @@ def _check(val: Any, t: Any, /) -> bool:
                     for item in val:
                         stack.append((item, item_t))
                     continue
-
             elif origin is _BYTESTRING_ORIGIN:
                 if isinstance(val, Buffer):
                     continue
-
             elif origin in _UNSUPPORTED_ORIGINS:
                 raise UnsupportedTypeError(t, _UNSUPPORTED_ORIGINS[origin])
-
             elif type(origin) is TypeAliasType:
                 # A generic alias: type Pair[T] = tuple[T, T]. Subscripting the
                 # alias's value substitutes the arguments for its parameters.
                 stack.append((val, origin.__value__[args]))
                 continue
-
             elif isinstance(origin, type):
                 if _check_generic_class(val, t, origin, args, stack):
                     continue
-
             else:
                 raise UnsupportedTypeError(t)
         if _backtrack(stack, unions):

@@ -4,18 +4,21 @@
 Asking about a type, rather than about a value: what it is, whether it can be
 validated against, and — when it cannot — precisely what stopped it.
 
-In v1 this was a side effect of a validation walk, obtained by passing an
-inspector *as the value* into ``validate`` and having every branch record itself
-instead of checking. One walk served two purposes, and every new type form had to
-be implemented three times in lockstep. Here the structure is a real artifact,
-built from the node model, which exists anyway.
+The structure is a real artifact, built from the node model, which exists anyway
+to serve the validators.
 """
+
+# In v1 this was a side effect of a validation walk: an inspector was passed *as
+# the value* into validate, and every branch carried an arm that recorded itself
+# instead of checking. One walk served two purposes, so every new type form had
+# to be implemented three times in lockstep, and forgetting one produced a silent
+# gap rather than an error. See DESIGN.md §3.5.
 
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
-from . import cache
+from . import _cache as cache
 from .nodes import TypeNode, node_for
 
 __all__ = (
@@ -98,13 +101,27 @@ def scoped_cache() -> Iterator[None]:
     operation, with no per-entry bookkeeping::
 
         with scoped_cache():
-            validate(val, build_a_type())
+            for spec in incoming_specs:
+                t = build_a_type_from(spec)
+                if can_validate(t):
+                    report(inspect_type(t))
+
+    Note that :func:`~typing_validation.validation.validate` is **not** what this
+    is for: it analyses nothing and interns nothing, so it neither fills this tier
+    nor benefits from it. What fills the cache is asking *about* a type —
+    :func:`can_validate`, :func:`inspect_type`, and the explanation built when a
+    validation fails.
 
     Nodes created inside may reference nodes in enclosing tiers, which outlive
     them; nothing enclosing can reference inward, because while this tier is
     active it is where all new nodes go. So dropping it can never leave a
     dangling reference — and can never change an answer, only a cost.
     """
+    # TODO: revisit this example when the reusable validators land. They are the
+    # mechanism that makes scoping genuinely compelling — one cached closure per
+    # type, built from a type the caller synthesised — whereas today the only
+    # clients are the introspection functions, which makes the case for scoping
+    # real but thin.
     cache.push_tier()
     try:
         yield

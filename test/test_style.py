@@ -15,8 +15,10 @@ out of are exactly the two it drove out of the codebase.
 """
 
 import ast
+import io
 import pathlib
 import re
+import tokenize
 
 import pytest
 
@@ -40,44 +42,84 @@ def _files() -> list[pathlib.Path]:
     ]
 
 
-def _blocks(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[list[ast.stmt]]:
-    """Every run of consecutive statements inside a function, nesting included."""
-    found: list[list[ast.stmt]] = []
-    for node in ast.walk(fn):
-        if node is not fn and isinstance(
-            node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-        ):
-            # A nested definition keeps its own conventions.
+def _string_lines(source: str) -> set[int]:
+    """Lines occupied by a string literal, where a blank line is content."""
+    inside: set[int] = set()
+    for token in tokenize.generate_tokens(io.StringIO(source).readline):
+        if token.type == tokenize.STRING:
+            inside.update(range(token.start[0], token.end[0] + 1))
+    return inside
+
+
+def _function_lines(source: str) -> dict[int, str]:
+    """Every line inside a function body, mapped to the function's name."""
+    owner: dict[int, str] = {}
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        for field in ("body", "orelse", "finalbody"):
-            block = getattr(node, field, None)
-            if (
-                isinstance(block, list)
-                and block
-                and isinstance(block[0], ast.stmt)
-            ):
-                found.append(block)
-    return found
+        start = node.body[0].lineno
+        for line in range(start, (node.end_lineno or start) + 1):
+            # An inner function claims its own lines, which is what we want:
+            # the blank line black forces before a nested def belongs to the
+            # outer body, and is reported against it.
+            owner.setdefault(line, node.name)
+    return owner
 
 
 @pytest.mark.parametrize("path", _files(), ids=lambda p: p.name)
 def test_no_blank_lines_inside_function_bodies(path: pathlib.Path) -> None:
     source = path.read_text()
     lines = source.splitlines()
-    offenders: list[str] = []
-    for node in ast.walk(ast.parse(source)):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        for block in _blocks(node):
-            for previous, following in zip(block, block[1:]):
-                for line in range(previous.end_lineno or 0, following.lineno):
-                    if lines[line].strip() == "":
-                        offenders.append(
-                            f"{path.name}:{line + 1} in {node.name}"
-                        )
+    in_string = _string_lines(source)
+    owner = _function_lines(source)
+    offenders = [
+        f"{path.name}:{line} in {name}"
+        for line, name in sorted(owner.items())
+        if not lines[line - 1].strip() and line not in in_string
+    ]
     assert not offenders, "blank lines inside function bodies: " + ", ".join(
         offenders
     )
+
+
+_DEVELOPER_TALK = re.compile(
+    r"\bv1\b|\bversion 1\b|\bv2\b|\b2\.[0-9]\b|eleven releases", re.IGNORECASE
+)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [p for p in _files() if p.parent.name == "typing_validation"],
+    ids=lambda p: p.name,
+)
+def test_docstrings_do_not_talk_about_other_releases(
+    path: pathlib.Path,
+) -> None:
+    """
+    A docstring is documentation for a user, who has never seen v1 and does not
+    care what a later release will add.
+
+    The test to apply: *is this useful to someone who has never seen v1?* If not
+    it is developer context — real and worth keeping, but as an inline comment,
+    which is read by the person it is for.
+    """
+    offenders: list[str] = []
+    for node in ast.walk(ast.parse(path.read_text())):
+        if not isinstance(
+            node,
+            (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Module),
+        ):
+            continue
+        doc = ast.get_docstring(node)
+        if doc is None:
+            continue
+        found = _DEVELOPER_TALK.findall(doc)
+        if found:
+            name = getattr(node, "name", "<module>")
+            offenders.append(
+                f"{path.name}:{name} mentions {sorted(set(found))}"
+            )
+    assert not offenders, "; ".join(offenders)
 
 
 @pytest.mark.parametrize("path", _files(), ids=lambda p: p.name)

@@ -4,6 +4,8 @@
 Tests for the node model, interning, and the questions asked of a type.
 """
 
+import sys
+
 from typing import Annotated, Any, Callable, Iterator, Literal, Self, Union
 
 import pytest
@@ -18,7 +20,7 @@ from typing_validation import (
     scoped_cache,
     validate,
 )
-from typing_validation.cache import _TIERS
+from typing_validation._cache import _TIERS
 from typing_validation.nodes import node_for
 
 from .cases import (
@@ -194,6 +196,55 @@ class TestRecursion:
 
     def test_walking_a_recursive_type_terminates(self) -> None:
         assert len(list(inspect_type(JSON).walk())) > 1
+
+
+class TestDeepTypes:
+    """
+    A **type** can be deep, and not only by recursing.
+
+    It is tempting to reason that type depth arrives via recursive aliases, which
+    terminate at a name and so bound the walk. That is wrong:
+    ``list[list[...[int]]]`` nested thousands deep recurses nowhere and is an
+    entirely ordinary type. A recursive builder raises ``RecursionError`` on it
+    while ``validate`` handles the matching value without blinking — two
+    mechanisms disagreeing about one type, one of them by crashing.
+    """
+
+    DEPTH = 5_000
+
+    def _deep(self) -> Any:
+        t: Any = int
+        for _ in range(self.DEPTH):
+            t = list[t]
+        return t
+
+    def _deep_value(self) -> Any:
+        val: Any = 1
+        for _ in range(self.DEPTH):
+            val = [val]
+        return val
+
+    def test_a_deep_type_is_analysed(self) -> None:
+        assert self.DEPTH > sys.getrecursionlimit()
+        assert can_validate(self._deep()) is True
+
+    def test_a_deep_type_yields_a_node_per_level(self) -> None:
+        assert len(list(inspect_type(self._deep()).walk())) == self.DEPTH + 1
+
+    def test_the_interpreter_agrees_about_a_deep_type(self) -> None:
+        t = self._deep()
+        assert can_validate(t) is True
+        assert validate(self._deep_value(), t) is True
+
+    def test_a_deep_poisoned_type_is_still_poisoned(self) -> None:
+        t: Any = Callable[[int], int]
+        for _ in range(self.DEPTH):
+            t = list[t]
+        assert can_validate(t) is False
+
+    def test_walking_a_deep_graph_terminates(self) -> None:
+        node = inspect_type(self._deep())
+        assert node.unsupported_components() == ()
 
 
 class TestInterning:

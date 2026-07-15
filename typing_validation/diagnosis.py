@@ -12,18 +12,22 @@ to *"do they agree on the boolean"*, which is a far smaller thing to police than
 *"do they agree on the message"*.
 
 And because this runs only on a failure, which is by definition exceptional, it
-may be as slow, allocating and thorough as it likes. It is, in effect, v1's
-``validate`` — rich and allocating — demoted from the hot path to diagnostics
-duty, where its costs stop mattering and its quality is the entire point.
+may be as slow, allocating and thorough as it likes — where its costs stop
+mattering and its quality is the entire point.
 
 The second traversal is sound only because validation is pure: the value handed
 here is the value the validator saw, undisturbed.
 """
 
+# This is, in effect, v1's validate — rich and allocating — demoted from the hot
+# path to diagnostics duty.
+
 import enum
 from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import (
+    NewType,
+    TypeAliasType,
     Any,
     final,
     get_args,
@@ -195,45 +199,150 @@ class ValidationFailure:
         )
 
     def __str__(self) -> str:
-        # STUB. The message format is deliberately unsettled and owed a round of
-        # its own, deferred until the rest of 2.0 is in place: it lives in
-        # exactly one place, so it is cheap to settle once and expensive to
-        # relitigate. This renders the tree faithfully enough to read while that
-        # decision is outstanding, and is not the format.
-        lines: list[str] = []
-        stack: list[tuple[ValidationFailure, int]] = [(self, 0)]
-        while stack:
-            failure, depth = stack.pop()
-            if depth > _STUB_MESSAGE_DEPTH:
-                lines.append("  " * depth + "...")
-                continue
-            lines.append(failure._line(depth))
-            stack.extend(
-                (cause, depth + 1) for cause in reversed(failure.causes)
-            )
+        """
+        The failure as a message: what was expected, where, and in what.
+
+        Three slots, of which the third is dropped when the first has already
+        filled it::
+
+            expected int, got str '1975'
+              at:  value.year
+              in:  Movie
+
+        The tree records everything; the message reports the one place worth
+        looking at. Which place that is takes some finding — see :func:`_locate`.
+        """
+        path, deepest = _locate(self)
+        lines = [_says(deepest), f"  at:  value{path}"]
+        # `in:` names the type the caller asked about. Line one has already
+        # named it whenever the failure is at the root and the detail says
+        # "expected <type>", so repeating it would add nothing. The details that
+        # never name a type are exactly the ones that still need it.
+        already_named = (
+            self.t is deepest.t and deepest.detail not in _NAMELESS_DETAILS
+        )
+        if not already_named:
+            lines.append(f"  in:  {_show(self.t)}")
         return "\n".join(lines)
 
-    def _line(self, depth: int) -> str:
-        pad = "  " * depth
-        where = ""
-        if self.location is not None:
-            where = f" {self.location.place.value}"
-            if self.location.at is not None:
-                where += f" {self.location.at!r}"
-        line = f"{pad}For type {self.t!r}{where}: {self.detail.value}"
-        if not self.causes:
-            line += f", got {self.val!r}"
-        return line
+
+# TODO: make the message's verbosity an option, once there is an option manager
+# to hang it on. The tree records every level and the message reports one place,
+# which is right by default and occasionally not: someone debugging a union that
+# should have matched wants to see what each member objected to, and someone
+# reading a deeply nested failure may want the containment chain rather than just
+# its endpoint. That is a switch, not a rewrite — the tree already holds all of
+# it, and this is the only place that decides what to show.
 
 
-_STUB_MESSAGE_DEPTH = 20
+_NAMELESS_DETAILS = (Detail.MISSING_KEY, Detail.NON_STRING_KEY)
 """
-How deep the stub renderer goes before eliding.
+The details whose message never names the type it is about.
 
-A failure twenty thousand levels down is a real failure and the tree records it
-in full; printing all of it would help nobody. Where the cut belongs, and whether
-it belongs at all, is part of the deferred message-format decision.
+Every other detail reads *"expected <type>"*, which is what makes ``in:``
+redundant for a failure at the root. These two do not, so they keep it.
 """
+
+
+def _show(t: Any, /) -> str:
+    """
+    A type as the user wrote it, rather than as Python reprs it.
+
+    ``int`` rather than ``<class 'int'>``, and ``UserId`` rather than
+    ``module.UserId``: the message is read by someone who has the type in front
+    of them, and its module is noise.
+    """
+    if t is None or t is type(None):
+        return "None"
+    if isinstance(t, type):
+        return t.__name__
+    name = getattr(t, "__name__", None)
+    if name is not None and type(t) in (TypeAliasType, NewType):
+        return str(name)
+    return str(t).replace("typing.", "")
+
+
+def _plural(n: int, noun: str, /) -> str:
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+def _says(f: ValidationFailure, /) -> str:
+    """What went wrong, in one line, at the place worth looking at."""
+    if f.detail is Detail.MISSING_KEY:
+        return f"missing required key {f.location.at!r}"  # type: ignore[union-attr]
+    if f.detail is Detail.NON_STRING_KEY:
+        return f"keys must be strings, got {type(f.val).__name__}"
+    if f.detail is Detail.WRONG_LENGTH:
+        return f"expected {_show(f.t)}, got {_plural(len(f.val), 'element')}"
+    if f.detail is Detail.NO_LITERAL:
+        # A literal's own type is the point, so naming the value's type as well
+        # would be saying the same thing twice. This is the one detail that does
+        # not end in a type-and-value pair, deliberately.
+        return f"expected {_show(f.t)}, got {f.val!r}"
+    if f.detail is Detail.NOT_A_CLASS:
+        return f"expected a class, got {type(f.val).__name__} {f.val!r}"
+    if f.detail is Detail.NOT_A_NAMED_TUPLE:
+        return f"expected a named tuple, got {type(f.val).__name__} {f.val!r}"
+    return f"expected {_show(f.t)}, got {type(f.val).__name__} {f.val!r}"
+
+
+def _step(f: ValidationFailure, /) -> str:
+    """How to reach this failure from the value that contains it, in code."""
+    if f.location is None:
+        return ""
+    place, at = f.location.place, f.location.at
+    if place is Place.INDEX:
+        return f"[{at}]"
+    if place is Place.POSITION:
+        # Braces rather than brackets, because iteration order is not stable
+        # across runs: this is a witness that something failed, not an address
+        # the reader can go to.
+        return f"{{{at}}}"
+    if place is Place.KEY:
+        return f".keys(){{{at!r}}}"
+    if place is Place.VALUE_AT:
+        return f"[{at!r}]"
+    if place is Place.FIELD:
+        return f".{at}"
+    return ""
+
+
+def _locate(root: ValidationFailure, /) -> tuple[str, ValidationFailure]:
+    """
+    The deepest place in the value the failure reaches, and what was expected
+    *there*.
+
+    Two rules, and the naive walk gets both wrong.
+
+    **Through a union, follow the member that got furthest.** A union fails only
+    when every member fails, so listing them all says nothing the union type has
+    not already said — and most of them fail on sight. Five of ``JSON``'s six
+    members reject a dict immediately; only ``dict[str, JSON]`` gets deep enough
+    to be worth reading, and it is the one that finds the offending float.
+
+    **Report the type recorded at the deepest step**, not whatever the walk
+    bottoms out in. An alias is not transparent, so at ``value['a'][1]['b']`` the
+    answer is *"expected JSON"* — not the six-member union that ``JSON`` happens
+    to expand to, which is longer and says less.
+    """
+    f, path, deepest = root, "", root
+    while True:
+        if f.detail is Detail.IN_COMPONENT and f.causes:
+            child = f.causes[0]
+            step = _step(child)
+            f = child
+            if step:
+                path += step
+                deepest = child
+        elif f.detail is Detail.NO_UNION_MEMBER and f.causes:
+            best = max(f.causes, key=lambda c: c.depth())
+            if best.depth() <= 1:
+                # Every member failed on sight, so there is nothing deeper to
+                # report and the union itself is the answer.
+                return path, deepest
+            f = best
+        else:
+            return path, deepest
 
 
 @final

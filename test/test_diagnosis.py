@@ -200,12 +200,21 @@ class TestDiagnosisIsNotRecursive:
         assert error.failure is not None
         assert error.failure.depth() > 2_000
 
-    def test_the_stub_message_does_not_print_the_whole_tree(self) -> None:
+    def test_the_message_stays_three_lines_however_deep_the_value(self) -> None:
+        # The tree records every level; the message reports the one place worth
+        # looking at, so its length is fixed rather than proportional to the
+        # value. An earlier renderer printed the tree and needed a depth cap to
+        # stay readable; locating the failure removes the need for one.
         val: Any = object()
         for _ in range(2_000):
             val = [val]
         error = _fails(val, JSON)
-        assert len(str(error).splitlines()) < 100
+        assert len(str(error).splitlines()) <= 3
+
+    def test_the_message_names_the_offending_place(self) -> None:
+        error = _fails({"a": [1, {"b": 1.5}]}, JSON)
+        assert "value['a'][1]['b']" in str(error)
+        assert "expected JSON" in str(error)
 
     def test_the_tree_reaches_the_actual_failure(self) -> None:
         val: Any = object()

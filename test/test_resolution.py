@@ -10,6 +10,7 @@ shaped the way it is. Where a test asserts something surprising, it says so.
 
 from typing import (
     Annotated,
+    List,
     Any,
     Literal,
     NamedTuple,
@@ -24,7 +25,7 @@ from typing import (
 import pytest
 from annotationlib import ForwardRef
 
-from typing_validation.resolution import (
+from typing_validation._resolution import (
     field_annotations,
     resolve,
     resolved_field_annotations,
@@ -228,6 +229,16 @@ class TestCPythonFacts:
         nested = TDForward.__annotations__["nested"].__args__[0]
         assert isinstance(nested, str)
         assert NTForward.__annotations__["top"].__forward_module__ is None
+
+    def test_generic_aliases_still_have_copy_with(self) -> None:
+        # The library's only dependency on a private API. It is used to rebuild a
+        # typing.List["X"] as a typing.List[X] rather than a list[X], because the
+        # two are unequal and hash differently, and rewriting the spelling only
+        # when a reference happened to need resolving would be worse than not
+        # supporting it. If this ever disappears, fail here rather than silently
+        # dropping the deprecated spellings.
+        assert hasattr(List[int], "copy_with")
+        assert List[int] != list[int]
 
     def test_a_nested_reference_degrades_to_a_bare_string(self) -> None:
         # list["Later"] stores the str 'Later', not a ForwardRef at all.

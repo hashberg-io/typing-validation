@@ -121,6 +121,15 @@ def resolve(ann: Any, owner: Any, /) -> Any:
         return Union[new_args]
     if isinstance(ann, GenericAlias):
         return origin[new_args]
+    # `copy_with` is a private, undocumented method on typing._GenericAlias, and
+    # is this library's only dependency on a private API. It is how typing itself
+    # rebuilds a parametrised alias with new arguments, and it is used here for
+    # one reason: it preserves the spelling. `origin[new_args]` is public and
+    # would work, but it would rewrite typing.List[Later] to list[Later] — which
+    # are unequal and hash differently — so the same annotation would report a
+    # different type depending on whether it happened to contain a reference
+    # needing resolution. A test pins the method's existence, so its removal
+    # fails loudly rather than silently dropping the deprecated spellings.
     copy_with = getattr(ann, "copy_with", None)
     if copy_with is None:
         return ann
