@@ -20,6 +20,7 @@ from typing import Any
 __all__ = (
     "plugin_import",
     "register_validator",
+    "registered_components",
     "registered_validator",
     "unsupported_explanation",
 )
@@ -34,6 +35,26 @@ absurd toll for supporting one type. A plugin may *optionally* supply more —
 structure, diagnostics, an emitter — but a boolean is the whole obligation.
 """
 
+PluginComponents = Callable[[Sequence[Any]], Sequence[Any]]
+"""
+Optional: given the type arguments, which of them the **core** validates.
+
+Not every type argument is one, and ``numpy.ndarray[shape, dtype]`` has one of
+each. The shape is an ordinary type, which the core checks the array's
+``.shape`` tuple against. ``numpy.dtype[numpy.uint8]`` is a *specification the
+plugin interprets*, and never a validation target in its own right.
+
+The core cannot tell them apart, and guessing wrong is not harmless. Treating
+every argument as a component makes ``numpy.dtype[numpy.uint8]`` one — and it is
+itself a parametrised numpy class with no validator of its own, so totality
+poisons it, and with it every array type there is. Declaring components is what
+keeps totality propagating through the arguments that deserve it and out of the
+ones that do not.
+
+Absent this, a plugin's arguments are opaque: the plugin checks them, and
+totality does not reach inside.
+"""
+
 _REGISTRY: dict[type, PluginCheck] = {}
 """
 Validators registered for classes we do not own.
@@ -42,6 +63,9 @@ A dunder classmethod is the ergonomic path for a class you own, but it is not
 available for ``numpy.ndarray``, which we cannot give a dunder to. Neither
 flavour subsumes the other.
 """
+
+_COMPONENTS: dict[type, PluginComponents] = {}
+"""Component declarations, for the plugins that supply one."""
 
 _PLUGINS = {"numpy": "typing_validation.numpy"}
 """
@@ -71,25 +95,65 @@ deliberately deferred.
 """
 
 
-def register_validator(cls: type, check: PluginCheck, /) -> None:
+def register_validator(
+    cls: type,
+    check: PluginCheck,
+    /,
+    components: PluginComponents | None = None,
+) -> None:
     """
     Declare how the type arguments of a parametrised class are validated.
 
     This is the route for classes you do not own. For a class you do own, define
-    a ``__validate__`` classmethod instead, which takes the same arguments and
-    means the same thing.
+    a ``__validate__`` classmethod instead — and, if you want components, a
+    ``__validate_components__`` classmethod. Both take the same arguments and
+    mean the same thing.
 
     :param cls: the class, unparametrised — ``numpy.ndarray``, not
         ``numpy.ndarray[shape, dtype]``.
     :param check: given a value and the type arguments, whether the value is
         valid.
-    :raises TypeError: if ``cls`` is not a class, or ``check`` is not callable.
+    :param components: optionally, which of the type arguments the core
+        validates, so that totality propagates through them. See
+        :data:`PluginComponents`.
+    :raises TypeError: if ``cls`` is not a class, or either callable is not.
     """
     if not isinstance(cls, type):
         raise TypeError(f"Expected a class, got {cls!r}.")
     if not callable(check):
         raise TypeError(f"Expected a callable, got {check!r}.")
+    if components is not None and not callable(components):
+        raise TypeError(f"Expected a callable, got {components!r}.")
     _REGISTRY[cls] = check
+    if components is not None:
+        _COMPONENTS[cls] = components
+    _invalidate_nodes()
+
+
+def _invalidate_nodes() -> None:
+    """
+    Drop every interned node, because registering has changed what is supported.
+
+    Not housekeeping — this is what keeps the invariant that **interning is
+    never semantically observable**. A node interned before registration records
+    the type as unsupported, and would go on saying so afterwards, while a cold
+    cache said otherwise. The verdict would then depend on whether anything had
+    happened to ask first: ``can_validate(NDArray[np.uint8])`` answers
+    :obj:`False` before ``import typing_validation.numpy`` and must answer
+    :obj:`True` after, cache or no cache.
+
+    Clearing everything is heavy-handed and exactly right. Registration happens
+    at import time and approximately never after, so the cost is nil, and
+    working out precisely which nodes a new validator affects means walking the
+    whole graph anyway.
+
+    The import is local because the node model depends on this module, and the
+    dependency may not run the other way at module level.
+    """
+    from .nodes import _TIERS
+
+    for tier in _TIERS:
+        tier.clear()
 
 
 def registered_validator(cls: type, /) -> PluginCheck | None:
@@ -99,6 +163,19 @@ def registered_validator(cls: type, /) -> PluginCheck | None:
     :param cls: the unparametrised class.
     """
     return _REGISTRY.get(cls)
+
+
+def registered_components(cls: type, /) -> PluginComponents | None:
+    """
+    The component declaration for a class, or :obj:`None` if it made none.
+
+    :param cls: the unparametrised class.
+    """
+    declared = _COMPONENTS.get(cls)
+    if declared is not None:
+        return declared
+    own = getattr(cls, "__validate_components__", None)
+    return own if callable(own) else None
 
 
 def plugin_import(origin: Any, /) -> str | None:

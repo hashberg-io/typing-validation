@@ -45,6 +45,7 @@ from annotationlib import ForwardRef
 
 from .plugins import (
     plugin_import,
+    registered_components,
     registered_validator,
     unsupported_explanation,
 )
@@ -593,11 +594,16 @@ def _analyse_parametrised_class(
         # on the type itself.
         node._form = TypeForm.GENERIC_CLASS
         return
-    # A plugin's arguments do bear on the verdict, and totality must propagate
-    # through them: NDArray[np.uint8 | np.float32] has a union inside it that
-    # the core validates.
     node._form = TypeForm.PLUGIN
-    node._children = tuple(_build(arg, fresh) for arg in args)
+    # Only the arguments the plugin *declares* as components are children, and
+    # only they propagate totality. The core cannot tell which of a plugin's
+    # arguments it validates and which are specifications the plugin interprets:
+    # numpy.ndarray[shape, dtype] has one of each, and treating the dtype as a
+    # component would poison every array type, since numpy.dtype[numpy.uint8] is
+    # itself a parametrised numpy class with no validator of its own.
+    components = registered_components(origin)
+    if components is not None:
+        node._children = tuple(_build(c, fresh) for c in components(args))
 
 
 _INLINE_FORWARD_REF_REASON = (
