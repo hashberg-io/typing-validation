@@ -342,7 +342,9 @@ Some forms carry their component types in *annotations* rather than in `__args__
 
 v1 used `get_type_hints`. It is the wrong tool, for one decisive reason: **it is all-or-nothing**. A single unresolvable field raises `NameError` for the whole class, and that `NameError` escapes from inside `validate` — neither a validation failure nor an `UnsupportedTypeError`, just a stray exception from a library the caller did not know was evaluating anything.
 
-`annotationlib.get_annotations(t, format=FORWARDREF)` instead returns the unresolvable field as a `ForwardRef` object carrying its module. That turns an opaque crash into a precise report: *field `nested` of `TD` refers to unresolved name `Later`*. It also composes with totality — the unresolvable field poisons the `TypedDict`, and `inspect_type` points at the culprit.
+`annotationlib.get_annotations(t, format=FORWARDREF)` instead hands back the unresolvable field as a `ForwardRef` object naming what it could not find. That turns an opaque crash into a precise report: *field `nested` of `TD` refers to unresolved name `Later`*. It also composes with totality — the unresolvable field poisons the `TypedDict` alone, and `inspect_type` points at the culprit.
+
+The recursive resolution that `get_type_hints` performs must then be reimplemented, since `get_annotations` does not do it: it leaves the `'Later'` inside `list["Later"]` exactly as it found it. `typing._eval_type` is the engine that would do it, and is rejected as a private API that already carries a deprecation warning scheduled to become an error in 3.15. So the walk is ours, over the bounded set of forms this library supports.
 
 ### The cost we inherit
 
@@ -374,14 +376,27 @@ Both see the same content for the forms we read annotations from, which is what 
 
 ### Forward references
 
-**A forward reference is resolvable iff it came from an annotation**, because that is what records a module to resolve against.
+**A forward reference is resolvable iff it came from an annotation**, because that is what identifies the owning class — and the owner is what identifies the module to resolve against.
 
-```python
-ForwardRef('Later', module='mymod')   # from an annotation — resolvable
-ForwardRef('JSON')                    # written inline    — no module, not resolvable
-```
+The intuitive rule, that a reference is resolvable when *it* records a module, is wrong, and would strand most of the cases we need. Only a top-level `TypedDict` annotation records one:
 
-The two inline spellings do not even agree with each other: `list["JSON"]` stores the bare string `'JSON'`, while `typing.List["JSON"]` stores a module-less `ForwardRef`. Neither can be resolved, and both are unsupported.
+| Written | Recorded as | Records a module |
+|---|---|---|
+| `class TD(TypedDict): x: "Later"` | `ForwardRef('Later', module='mymod')` | yes |
+| `class NT(NamedTuple): x: "Later"` | `ForwardRef('Later')` | no |
+| `class TD(TypedDict): x: list["Later"]` | `list['Later']` | no — it is a bare `str` |
+
+So the module is recovered from the **owner** in every case, which is uniform and is the only thing that works for the bottom two. `ForwardRef.evaluate(owner=…)` falls back to the owner's module, so the mechanism is already there.
+
+An inline `validate(x, list["JSON"])` records the *identical* bare string as the annotation in the third row. The two are indistinguishable as objects, and only the annotation can be resolved — which is the proof that resolvability is a property of the context, not of the reference.
+
+#### Resolution happens before interning, not after
+
+This is forced by §4.1's invariant rather than chosen for speed.
+
+`list['Later']` is hashable, and equal to every other `list['Later']` in the process — including ones in other modules, meaning other classes. Interning it as a key would therefore merge references that resolve differently, and the verdict would depend on which owner happened to intern it first. That is precisely what "interning is never semantically observable" forbids.
+
+So the annotation reader **rewrites** the annotation, replacing each reference with what it resolves to, and hands the node graph a fully resolved type. `list['Later']` becomes `list[Later]` before anything is keyed on it, and `list[Later]` means one thing everywhere. The node graph never sees an unresolved reference except an unresolvable one, which is unsupported and interned as itself.
 
 **`validation_aliases` is removed.** It existed to paper over exactly this case, and the reason it cannot survive is structural rather than aesthetic: the only way to resolve an inline reference is against the caller's frame, which §4.1 forbids outright — an interned node for `list["JSON"]` would mean different things depending on which caller built it first, making interning observable. It is also incoherent for `validator(t)`, which is called from somewhere entirely unrelated to where `t` was written.
 

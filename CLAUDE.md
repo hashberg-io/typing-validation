@@ -34,7 +34,7 @@ Each gets a sub-branch off `v2`, carries the tests that cover it, and is merged 
 | # | Milestone | Branch | Contents | Status |
 |---|---|---|---|---|
 | 1 | Errors and dev tooling | `errors` | `ValidationError`, `UnsupportedTypeError`, the test and lint setup | done |
-| 2 | Type resolution | `type-resolution` | annotation reading via `annotationlib`, qualifier stripping, forward-reference classification (§6) | not started |
+| 2 | Type resolution | `type-resolution` | annotation reading via `annotationlib`, qualifier stripping, forward-reference classification (§6) | done |
 | 3 | The interpreter, core forms | `validate-core` | the work stack, plain classes, `None`/`Any`, bare and parametric collections, mappings, tuples, unions, literals; `is_valid`, `validated`, `validated_iter`; the test corpus | not started |
 | 4 | The interpreter, remaining forms | `validate-full` | `TypeVar`, `TypedDict`, `NamedTuple`, `Type[T]`, protocols, aliases, `Annotated`, `NewType`, forward refs, iterables; the plugin registry and `__validate__` hook (§7) | not started |
 | 5 | The node model and configuration | `node-model` | interning, tiers, hash-cons recursion, totality memoisation, `can_validate`, `inspect_type` (§4, §3.5); the internal option manager (§8) | not started |
