@@ -497,3 +497,58 @@ It validates option values with our own `validate`, which is pleasingly circular
 The scope is deliberately small. This is a settings object, not a configuration framework, and it stays in proportion to a surface that currently amounts to a handful of switches. If it ever grows past that, the honest move is to reconsider, not to grow a framework inside a validation library.
 
 The dependency direction is the general principle here: **this library sits at the bottom of the stack**, so anything it depends on must sit lower still. `optmanage` belongs *above* it, and using it here would invert the graph of our own projects.
+
+## 9. Public API
+
+```python
+# validate a value
+validate(val, t, /) -> Literal[True]                        # raises on failure
+is_valid(val, t, /) -> bool                                 # no diagnostics (§5)
+validated(val, t, /) -> T                                   # returns val
+validated_iter(val, t, /) -> Iterable[T]                    # validates items as yielded
+
+# build a reusable validator for a fixed type
+validator(t, /) -> Callable[[Any], Literal[True]]           # §3.3
+compiled_validator(t, /) -> Callable[[Any], Literal[True]]  # §3.4
+
+# ask about a type
+inspect_type(t, /) -> TypeStructure                         # §3.5
+can_validate(t, /) -> bool
+
+# extend
+register_validator(cls, ...)                                # §7
+# plus the __validate__ classmethod protocol
+
+# errors
+UnsupportedTypeError(NotImplementedError)
+ValidationError(TypeError)                                  # carries the failure tree
+
+# manage the cache
+# clear, forget a type, scoped caching context manager      # §4.3
+```
+
+Arguments are **positional-only**. `val` and `t` are poor names to be permanently bound to, and nobody passes them by keyword.
+
+### `validated_iter` survives on merit
+
+It is not a convenience wrapper. It is the only honest way to validate an `Iterator[T]`: determining the items of a one-shot iterator consumes it, so [purity](#2-validation-semantics) forbids doing it eagerly, and `validated_iter` instead checks each item as it is yielded. It exists because the type system can express something the runtime cannot check without destroying it.
+
+### Removed from v1
+
+| Removed | Replacement | Why |
+|---|---|---|
+| `validation_aliases` | PEP 695 `type X = ...` | Its only use was inline forward references, which §6 shows cannot be resolved soundly. |
+| `latest_validation_failure` | the exception's attribute | Backed by a module global *and* `sys.last_value`; had to be called immediately, cleared itself on read, unsound under re-entrancy. |
+| `get_validation_failure` | the exception's attribute | Subsumed. It existed to un-smuggle what `setattr` had smuggled on. |
+| `TypeInspector` | `inspect_type`'s return | v1's inspector was a value passed *into* `validate`; v2's is a real artifact (§3.5). |
+| `UnsupportedType` | marking in the structure | The wrapper existed to mark unsupported nodes inside `TypeInspector`'s output. |
+
+### Two promises v1 made, now kept
+
+Neither of these is a break we chose; both are changes v1 documented as coming and never shipped.
+
+**`can_validate` returns `bool`.** v1 returned a `TypeInspector`, relying on it being truthy, and carried the warning: *"The return type will be changed to `bool` in v1.3.0. To obtain a TypeInspector object, please use the newly introduced `inspect_type` instead."* The split is now real: `can_validate` answers a question, `inspect_type` returns a structure.
+
+**`UnsupportedTypeError` extends `NotImplementedError`.** v1 extended `ValueError` with the warning: *"Currently extends ValueError for backwards compatibility. This will be changed to NotImplementedError in v1.3.0."* `NotImplementedError` is the honest base: an unsupported type is not a bad value, it is a thing this library has not implemented.
+
+The distinction matters more than it looks. `UnsupportedTypeError` and `ValidationError` answer different questions — *"I cannot check this"* versus *"I checked this and it is wrong"* — and a caller must be able to tell them apart. Sharing a base with the validation error would blur exactly the line `can_validate` exists to draw.
