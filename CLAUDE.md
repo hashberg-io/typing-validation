@@ -27,6 +27,24 @@ Each stage manufactures the oracle for the next, so the order is not negotiable:
 
 Every breaking change lands in 2.0. Stages 2 and 3 are purely additive.
 
+### 2.0 milestones
+
+Each gets a sub-branch off `v2`, carries the tests that cover it, and is merged only once those tests pass.
+
+| # | Milestone | Branch | Contents | Status |
+|---|---|---|---|---|
+| 1 | Errors and configuration | `errors-and-config` | `ValidationError`, `UnsupportedTypeError`, the internal option manager (§8), dev tooling | not started |
+| 2 | Type resolution | `type-resolution` | annotation reading via `annotationlib`, qualifier stripping, forward-reference classification (§6) | not started |
+| 3 | The interpreter, core forms | `validate-core` | the work stack, plain classes, `None`/`Any`, bare and parametric collections, mappings, tuples, unions, literals; `is_valid`, `validated`, `validated_iter`; the test corpus | not started |
+| 4 | The interpreter, remaining forms | `validate-full` | `TypeVar`, `TypedDict`, `NamedTuple`, `Type[T]`, protocols, aliases, `Annotated`, `NewType`, forward refs, iterables; the plugin registry and `__validate__` hook (§7) | not started |
+| 5 | The node model | `node-model` | interning, tiers, hash-cons recursion, totality memoisation, `can_validate`, `inspect_type` (§4, §3.5) | not started |
+| 6 | Diagnosis | `diagnose` | the failure tree and the second traversal (§3.6, §5); **messages stubbed** pending the deferred format round | not started |
+| 7 | The NumPy plugin | `numpy-plugin` | `typing_validation.numpy` (§7) | not started |
+| 8 | Benchmarks | `benchmarks` | the suite of §11, including the comparison against v1 | not started |
+| 9 | Release polish | `release-polish` | README usage, API docs, CI | not started |
+
+The ordering is not arbitrary. `validate` (3, 4) lands before the node model (5) because §3.1 makes it genuinely independent of it — which then gives `can_validate` an oracle: a validator raises `UnsupportedTypeError` exactly when `can_validate` is `False`. `diagnose` (6) follows the node model because §4 makes it a method on the node.
+
 ## Invariants that are easy to break while coding
 
 These are load-bearing. Violating any of them silently is how v1 got its bugs.
