@@ -444,9 +444,9 @@ The tempting alternative — enable automatically when the underlying library ha
 
 It is worth noting the check is *self-gating* regardless: if numpy was never imported, `np.ndarray` does not exist as an object, so no type can hold it as an origin. A numpy type reaching `validate` is itself proof that numpy is imported. The explicit-import rule is therefore about determinism alone, not about avoiding an import cost.
 
-### The hint table
+### The plugin manifest
 
-To name the missing import, the error consults a small static table:
+A small static table records which modules this distribution ships a plugin for:
 
 ```python
 {"numpy": "typing_validation.numpy"}
@@ -454,7 +454,14 @@ To name the missing import, the error consults a small static table:
 
 keyed by `t.__origin__.__module__.split(".")[0]`. That is a plain string comparison requiring no import at all.
 
-The table is **behaviour-neutral by construction** — it is consulted only when building an error message that is being raised anyway, so a stale or missing entry costs helpfulness, never correctness. It cannot make validation wrong.
+**It decides behaviour, and it is the only thing that can.** An earlier draft called it a hint table and claimed it was behaviour-neutral, consulted only to decorate an error that was being raised anyway. That is wrong, and the error was to think the two situations arriving at this arm are one situation.
+
+They are not. An unregistered parametrised class is either:
+
+- **`mylib.Matrix[int]`** — nothing could determine the arguments of a class we know nothing about. The type validates on its origin alone and the arguments go unchecked, which [TYPES.md](TYPES.md) specifies as the *meaning* of a generic class rather than a shortfall. Not an error.
+- **`numpy.ndarray[shape, dtype]`** — the arguments *are* determinable, by a plugin sitting in this very distribution, unimported. Validating on the origin alone would return `True` for `validate(np.array([1.5]), NDArray[np.uint8])`. That is a totality violation: an obligation we could have discharged, silently skipped. An error.
+
+Both reach this arm as "a parametrised class with no registered validator", and nothing about the *type* distinguishes them. Only the manifest does. So an entry here is a claim that support exists and merely needs enabling, and a **missing entry costs correctness, not helpfulness** — which is the opposite of what the earlier draft said, and worth being plain about.
 
 The table is ours for now. Letting plugins contribute entries is an obvious extension and deliberately deferred; ours-alone is simpler and nothing forecloses it.
 
@@ -620,7 +627,9 @@ Because all mechanisms fail hard and delegate to one `diagnose` (§3.6), **there
 
 ### Differential testing
 
-The curated corpus proves the cases we thought of. Generated `(val, t)` pairs, checked for agreement across mechanisms, probe the ones we did not — which, given that the whole architecture rests on the mechanisms agreeing, is worth doing properly. The invariants are cheap to state: all mechanisms agree on the verdict; `can_validate` agrees with whether the validators raise `UnsupportedTypeError`; validation never mutates its input.
+The curated corpus proves the cases we thought of. Generated `(val, t)` pairs, checked for agreement across mechanisms, probe the ones we did not — which, given that the whole architecture rests on the mechanisms agreeing, is worth doing properly. The invariants are cheap to state: **for every `t` with `can_validate(t)`**, all mechanisms agree on the verdict for every value; validation never mutates its input.
+
+That qualifier is load-bearing rather than a hedge. Where `can_validate(t)` is false the mechanisms genuinely differ, and must: `validate` walks value and type together and raises when it *reaches* the unsupported component, while `validator(t)` analyses the whole type before seeing a value and raises at construction. So `validate([], list[Callable[[int], int]])` returns `True` where `validator(list[Callable[[int], int]])` refuses to build at all. Neither is wrong; agreement is only meaningful where the type is honoured. [TYPES.md](TYPES.md) states the rule and why `validate` is not made eager.
 
 That last one deserves a real test rather than a convention, since [purity](#2-validation-semantics) is assumed by three separate parts of this design.
 

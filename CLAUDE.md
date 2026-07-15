@@ -35,15 +35,18 @@ Each gets a sub-branch off `v2`, carries the tests that cover it, and is merged 
 |---|---|---|---|---|
 | 1 | Errors and dev tooling | `errors` | `ValidationError`, `UnsupportedTypeError`, the test and lint setup | done |
 | 2 | Type resolution | `type-resolution` | annotation reading via `annotationlib`, qualifier stripping, forward-reference classification (§6) | done |
-| 3 | The interpreter, core forms | `validate-core` | the work stack, plain classes, `None`/`Any`, bare and parametric collections, mappings, tuples, unions, literals; `is_valid`, `validated`, `validated_iter`; the test corpus | not started |
-| 4 | The interpreter, remaining forms | `validate-full` | `TypeVar`, `TypedDict`, `NamedTuple`, `Type[T]`, protocols, aliases, `Annotated`, `NewType`, forward refs, iterables; the plugin registry and `__validate__` hook (§7) | not started |
-| 5 | The node model and configuration | `node-model` | interning, tiers, hash-cons recursion, totality memoisation, `can_validate`, `inspect_type` (§4, §3.5); the internal option manager (§8) | not started |
-| 6 | Diagnosis | `diagnose` | the failure tree and the second traversal (§3.6, §5); **messages stubbed** pending the deferred format round | not started |
-| 7 | The NumPy plugin | `numpy-plugin` | `typing_validation.numpy` (§7) | not started |
-| 8 | Benchmarks | `benchmarks` | the suite of §11, including the comparison against v1 | not started |
-| 9 | Release polish | `release-polish` | README usage, API docs, CI | not started |
+| 3 | The interpreter | `validate` | the work stack and the whole dispatch chain, covering every form in TYPES.md; the plugin registry and `__validate__` hook (§7); `is_valid`, `validated`, `validated_iter`; the test corpus | done |
+| 4 | The node model and configuration | `node-model` | interning, tiers, hash-cons recursion, totality memoisation, `can_validate`, `inspect_type` (§4, §3.5); the internal option manager (§8) | not started |
+| 5 | Diagnosis | `diagnose` | the failure tree and the second traversal (§3.6, §5); **messages stubbed** pending the deferred format round | not started |
+| 6 | The NumPy plugin | `numpy-plugin` | `typing_validation.numpy` (§7) | not started |
+| 7 | Benchmarks | `benchmarks` | the suite of §11, including the comparison against v1 | not started |
+| 8 | Release polish | `release-polish` | README usage, API docs, CI | not started |
 
-The ordering is not arbitrary. `validate` (3, 4) lands before the node model (5) because §3.1 makes it genuinely independent of it — which then gives `can_validate` an oracle: a validator raises `UnsupportedTypeError` exactly when `can_validate` is `False`. `diagnose` (6) follows the node model because §4 makes it a method on the node.
+The ordering is not arbitrary. `validate` (3) lands before the node model (4) because §3.1 makes it genuinely independent of it — which then gives `can_validate` an oracle: a validator raises `UnsupportedTypeError` exactly when `can_validate` is `False`. `diagnose` (5) follows the node model because §4 makes it a method on the node.
+
+The interpreter is one milestone rather than two because its dispatch chain is a single artifact. Splitting it by type form would leave a half-written chain whose arm ordering cannot be checked — and an arm shadowing a later one is exactly the bug that made `Iterable[T]`'s item check unreachable for eleven releases.
+
+Configuration rides with the node model because the cache's lifetime switches are its only client in 2.0, and because §8 has the option manager validate option values with our own `validate` — which by then exists.
 
 Configuration rides with the node model because the cache's lifetime switches are its only client in 2.0, and because §8 has the option manager validate option values with our own `validate` — which by then exists.
 
