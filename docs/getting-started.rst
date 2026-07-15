@@ -41,6 +41,38 @@ When a value does not conform, the error says **where**:
 The same explanation is available as a structure, on the exception, via
 :attr:`~typing_validation.errors.ValidationError.failure`.
 
+Validating the same type repeatedly
+-----------------------------------
+
+:func:`~typing_validation.validation.validate` analyses the type on every call.
+When many values are validated against one type,
+:func:`~typing_validation.composition.validator` analyses it once and returns a
+function:
+
+.. code-block:: python
+
+    >>> from typing_validation import validator
+    >>> check = validator(list[int])
+    >>> check([1, 2, 3])
+    True
+
+Same contract, same verdict, and about 2.7x faster per call. It repays the cost
+of building it almost at once — the benchmark suite reports exactly when, per
+type: nought to four values for a container, twenty-two for a fixed tuple, a few
+hundred for a scalar. So :func:`~typing_validation.validation.validate` for a
+one-off check, and :func:`~typing_validation.composition.validator` when the type
+is fixed and the values keep coming.
+
+One difference is deliberate. Because it analyses the whole type before it sees
+any value, it **rejects an unsupported type immediately**, where
+:func:`~typing_validation.validation.validate` waits for a value to reach the
+unsupported part and may never notice:
+
+.. code-block:: python
+
+    validator(list[Callable[[int], int]])     # UnsupportedTypeError, at once
+    validate([], list[Callable[[int], int]])  # True — nothing reached it
+
 The rest of the surface
 -----------------------
 
