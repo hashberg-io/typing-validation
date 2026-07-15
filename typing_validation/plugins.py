@@ -115,7 +115,7 @@ def register_validator(
         valid.
     :param components: optionally, which of the type arguments the core
         validates, so that totality propagates through them. See
-        :data:`PluginComponents`.
+        :data:`~typing_validation.plugins.PluginComponents`.
     :raises TypeError: if ``cls`` is not a class, or either callable is not.
     """
     if not isinstance(cls, type):
