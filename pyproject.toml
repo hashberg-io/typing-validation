@@ -38,7 +38,7 @@ filterwarnings = ["error"]
 [tool.mypy]
 python_version = "3.14"
 strict = true
-files = ["typing_validation", "test"]
+files = ["typing_validation", "test", "benchmark"]
 
 [tool.pyright]
 typeCheckingMode = "off"
