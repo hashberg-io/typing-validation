@@ -468,3 +468,32 @@ The generic form names both flavours, so the error always states how to fix itse
 `typing_validation.numpy` ships in this distribution and provides `NDArray[dtype]` and `ndarray[shape, dtype]`.
 
 Moving it out of the core is worth doing on its own merits — v1 put an `import numpy` probe in the middle of the dispatcher, which is an optional third-party dependency on the hot path, in a library that has no dependencies. But the stronger reason is that **it dogfoods the plugin API**. A plugin system whose author never uses it is always subtly wrong. NumPy is a punishing first client: dtype unions, shape tuples, parametrised origins like `np.number[Any]`. If the API can express NumPy, it can express what users will bring to it. Designing the API in a later release against imaginary clients would get it wrong, and by then numpy would be welded into the core and could only be extracted by a breaking change.
+
+## 8. Configuration
+
+The library needs a small settings surface — cache behaviour (§4.3), the inlining budget for §3.4, and whatever a future release adds.
+
+### Why not `optmanage`
+
+`optmanage` is the natural fit. It is designed for exactly this, its ergonomics are good, and its `__call__`-as-context-manager is precisely the shape §4.3's scoped caching wants. **It cannot be used, because it depends on this library.**
+
+```
+Requires-Dist: typing-validation >=1.2.4
+Requires-Dist: typing-extensions >=4.6.0
+```
+
+`optmanage/option.py` opens with `from typing_validation import can_validate, validate`. That is a genuine cycle, and not merely an ugly line in the metadata: if a user imports `optmanage` first, `optmanage` begins initialising, imports `typing_validation`, which imports `optmanage` back out of `sys.modules` half-initialised, where `Option` is not yet bound. An order-dependent `ImportError`.
+
+It would also drag `typing_extensions` back in transitively — the dependency §1 exists to have deleted.
+
+The cycle is not incidental, either. `optmanage` validates option values *using this library*; runtime validation is its value proposition. There is no version of it that both keeps that and stops depending on us.
+
+### What we do instead
+
+A minimal internal option manager, **shaped like `optmanage`** because that shape is right: options as typed class attributes with defaults, validated on assignment, with a context manager for scoped overrides.
+
+It validates option values with our own `validate`, which is pleasingly circular — it is exactly what `optmanage` does, and exactly why `optmanage` depends on us. We simply do it inside the boundary instead of across it.
+
+The scope is deliberately small. This is a settings object, not a configuration framework, and it stays in proportion to a surface that currently amounts to a handful of switches. If it ever grows past that, the honest move is to reconsider, not to grow a framework inside a validation library.
+
+The dependency direction is the general principle here: **this library sits at the bottom of the stack**, so anything it depends on must sit lower still. `optmanage` belongs *above* it, and using it here would invert the graph of our own projects.
