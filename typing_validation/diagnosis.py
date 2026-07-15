@@ -21,12 +21,20 @@ here is the value the validator saw, undisturbed.
 """
 
 import enum
-import typing
 from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal, Union, final
-
+from typing import (
+    Any,
+    final,
+    get_args,
+    get_origin,
+    Literal,
+    NamedTuple,
+    Tuple,
+    Union,
+)
 from .nodes import TypeForm, TypeNode, node_for
+from .plugins import registered_validator
 
 __all__ = (
     "Detail",
@@ -155,7 +163,9 @@ class ValidationFailure:
     """Why it failed."""
 
     location: Location | None = None
-    """Where this sits within the value that contains it. :obj:`None` at the root."""
+    """
+    Where this sits within the value that contains it. :obj:`None` at the root.
+    """
 
     causes: tuple[ValidationFailure, ...] = ()
     """The failures inside this one."""
@@ -242,8 +252,6 @@ def diagnose(val: Any, t: Any, /) -> ValidationFailure:
     """
     Explain why a value is not valid for a type.
 
-    :param val: the value that failed.
-    :param t: the type it failed against.
     :raises DiagnosisFailure: if the value turns out to be valid after all, which
         means a mechanism has drifted from the specification.
     """
@@ -365,42 +373,35 @@ def _expand(val: Any, t: Any, location: Location | None, /) -> _Frame:
     node = node_for(t)
     form = node.form
     children = node.children
-
     if form is TypeForm.ANY:
         return _ok(val, t, location)
-
     if form is TypeForm.NONE:
         if val is None:
             return _ok(val, t, location)
         return _bad(val, t, location, Detail.NOT_NONE)
-
     if form is TypeForm.CLASS or form is TypeForm.PROTOCOL:
         if isinstance(val, _isinstance_target(node)):
             return _ok(val, t, location)
         return _bad(val, t, location, Detail.NOT_AN_INSTANCE)
-
     if form in _WRAPPERS:
         frame = _ok(val, t, location)
         if children:
             frame.todo.append((val, children[0].t, Location(Place.WRAPPED)))
         return frame
-
     if form is TypeForm.UNION:
         frame = _ok(val, t, location)
         frame.is_union = True
         for i, child in enumerate(children):
             frame.todo.append((val, child.t, Location(Place.MEMBER, i)))
         return frame
-
     if form is TypeForm.LITERAL:
         val_t = type(val)
-        for literal in typing.get_args(t):
+        for literal in get_args(t):
             if literal is val or (type(literal) is val_t and literal == val):
                 return _ok(val, t, location)
         return _bad(val, t, location, Detail.NO_LITERAL)
-
     if form is TypeForm.COLLECTION:
-        origin = typing.get_origin(t)
+        origin = get_origin(t)
         if not isinstance(val, origin):
             return _bad(val, t, location, Detail.NOT_AN_INSTANCE)
         frame = _ok(val, t, location)
@@ -416,9 +417,8 @@ def _expand(val: Any, t: Any, location: Location | None, /) -> _Frame:
             for i, item in enumerate(val):
                 frame.todo.append((item, children[0].t, Location(place, i)))
         return frame
-
     if form is TypeForm.MAPPING:
-        origin = typing.get_origin(t)
+        origin = get_origin(t)
         if not isinstance(val, origin):
             return _bad(val, t, location, Detail.NOT_AN_INSTANCE)
         frame = _ok(val, t, location)
@@ -431,13 +431,10 @@ def _expand(val: Any, t: Any, location: Location | None, /) -> _Frame:
                     (item, children[1].t, Location(Place.VALUE_AT, key))
                 )
         return frame
-
     if form is TypeForm.TUPLE:
         return _expand_tuple(val, t, location, node)
-
     if form is TypeForm.TYPED_DICT:
         return _expand_typed_dict(val, t, location, node)
-
     if form is TypeForm.NAMED_TUPLE:
         if not isinstance(val, t):
             return _bad(val, t, location, Detail.NOT_AN_INSTANCE)
@@ -448,22 +445,18 @@ def _expand(val: Any, t: Any, location: Location | None, /) -> _Frame:
                 (getattr(val, name), child.t, Location(Place.FIELD, name))
             )
         return frame
-
     if form is TypeForm.ANY_NAMED_TUPLE:
         if isinstance(val, tuple) and hasattr(type(val), "_fields"):
             return _ok(val, t, location)
         return _bad(val, t, location, Detail.NOT_A_NAMED_TUPLE)
-
     if form is TypeForm.TYPE_OF:
         return _expand_type_of(val, t, location, node)
-
     if form is TypeForm.ITERATOR:
-        if isinstance(val, typing.get_origin(t)):
+        if isinstance(val, get_origin(t)):
             return _ok(val, t, location)
         return _bad(val, t, location, Detail.NOT_AN_INSTANCE)
-
     if form is TypeForm.MAYBE_ITEMS:
-        origin = typing.get_origin(t)
+        origin = get_origin(t)
         if not isinstance(val, origin):
             return _bad(val, t, location, Detail.NOT_AN_INSTANCE)
         frame = _ok(val, t, location)
@@ -473,15 +466,12 @@ def _expand(val: Any, t: Any, location: Location | None, /) -> _Frame:
                     (item, children[0].t, Location(Place.INDEX, i))
                 )
         return frame
-
     if form is TypeForm.GENERIC_CLASS:
-        if isinstance(val, typing.get_origin(t)):
+        if isinstance(val, get_origin(t)):
             return _ok(val, t, location)
         return _bad(val, t, location, Detail.NOT_AN_INSTANCE)
-
     if form is TypeForm.PLUGIN:
         return _expand_plugin(val, t, location, node)
-
     # An unsupported type is not a failure to explain: the value was never in
     # question, and something upstream should have raised long before here.
     return _ok(val, t, location)
@@ -505,7 +495,7 @@ says both — ``UserId``, and then the ``int`` it turned out not to be.
 
 def _isinstance_target(node: TypeNode, /) -> Any:
     t = node.t
-    origin = typing.get_origin(t)
+    origin = get_origin(t)
     return t if origin is None else origin
 
 
@@ -514,9 +504,9 @@ def _expand_tuple(
 ) -> _Frame:
     if not isinstance(val, tuple):
         return _bad(val, t, location, Detail.NOT_AN_INSTANCE)
-    args = typing.get_args(t)
+    args = get_args(t)
     if not args:
-        if t is typing.Tuple or not val:
+        if t is Tuple or not val:
             return _ok(val, t, location)
         return _bad(val, t, location, Detail.WRONG_LENGTH)
     frame = _ok(val, t, location)
@@ -563,7 +553,7 @@ def _expand_type_of(
 ) -> _Frame:
     if not isinstance(val, type):
         return _bad(val, t, location, Detail.NOT_A_CLASS)
-    args = typing.get_args(t)
+    args = get_args(t)
     if not args:
         return _ok(val, t, location)
     (arg,) = args
@@ -578,15 +568,13 @@ def _expand_type_of(
 def _expand_plugin(
     val: Any, t: Any, location: Location | None, node: TypeNode, /
 ) -> _Frame:
-    origin = typing.get_origin(t)
+    origin = get_origin(t)
     if not isinstance(val, origin):
         return _bad(val, t, location, Detail.NOT_AN_INSTANCE)
     check = getattr(origin, "__validate__", None)
     if check is None:
-        from .plugins import registered_validator
-
         check = registered_validator(origin)
-    if check is not None and check(val, typing.get_args(t)):
+    if check is not None and check(val, get_args(t)):
         return _ok(val, t, location)
     # A plugin's obligation is a boolean, so this is all there is to say unless
     # it chooses to say more. Diagnostics are an optional thing a plugin may

@@ -28,7 +28,7 @@ value alone, and are adapted to this shape when they land.
 """
 
 MECHANISMS: list[Mechanism] = [validate]
-"""Every mechanism that validates. Each must agree with the others on every case."""
+"""Every mechanism that validates. All must agree on every case."""
 
 MECHANISM_IDS: list[str] = ["validate"]
 """Names for the mechanisms, so a failure says which one drifted."""

@@ -42,9 +42,9 @@ class UnsupportedTypeError(NotImplementedError):
 
     def __new__(cls, t: Any, explanation: str | None = None, /) -> Self:
         """
-        :param t: the whole type that cannot be validated against.
-        :param explanation: optional additional lines naming the component at
-            fault and, where possible, how to gain support for it.
+        ``t`` is the **whole** type, not the component at fault. The explanation
+        is where the component is named, along with whatever would gain support
+        for it.
         """
         self: Self = NotImplementedError.__new__(cls, t, explanation)
         self._t = t
@@ -79,10 +79,10 @@ class ValidationError(TypeError):
     raised a :class:`TypeError` — a distinction that hid a real crash in v1 for
     eleven releases.
 
-    The structured explanation hangs off :attr:`~typing_validation.errors.ValidationError.failure`, as a proper attribute
-    rather than v1's ``setattr(error, "validation_failure", …)`` smuggling.
-    Programmatic access is then an attribute on an exception you have already
-    caught, which is what ``get_validation_failure`` existed to provide.
+    The structured explanation hangs off :attr:`failure`, as a proper
+    attribute rather than v1's ``setattr(error, "validation_failure", …)``
+    smuggling. Programmatic access is then an attribute on an exception you have
+    already caught, which is what ``get_validation_failure`` existed to provide.
     """
 
     __slots__ = ("_val", "_t", "_failure")
@@ -100,9 +100,9 @@ class ValidationError(TypeError):
         cls, val: Any, t: Any, failure: "ValidationFailure | None" = None, /
     ) -> Self:
         """
-        :param val: the value that failed validation.
-        :param t: the type it was validated against.
-        :param failure: the structured explanation, if one was built.
+        The failure is optional because not every raiser builds one:
+        ``validated_iter`` reports the item it stopped at without diagnosing the
+        whole iterable.
         """
         self: Self = TypeError.__new__(cls, val, t, failure)
         self._val = val

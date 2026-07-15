@@ -25,10 +25,13 @@ system whose author never uses it is always subtly wrong, and NumPy is a
 punishing first client.
 """
 
-import typing
 from collections.abc import Sequence
-from typing import Any, Union
-
+from typing import (
+    Any,
+    get_args,
+    get_origin,
+    Union,
+)
 import numpy as np
 
 from .errors import UnsupportedTypeError
@@ -81,8 +84,8 @@ def _unpack(args: Sequence[Any], t: Any, /) -> tuple[Any, Any]:
             "NDArray[numpy.uint8].",
         )
     shape_t, dtype_container = args
-    dtype_args = typing.get_args(dtype_container)
-    if typing.get_origin(dtype_container) is not np.dtype or not dtype_args:
+    dtype_args = get_args(dtype_container)
+    if get_origin(dtype_container) is not np.dtype or not dtype_args:
         raise UnsupportedTypeError(
             t,
             f"Expected numpy.dtype[...] as the second argument, got "

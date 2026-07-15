@@ -18,7 +18,8 @@ from typing_validation import (
     scoped_cache,
     validate,
 )
-from typing_validation.nodes import _TIERS, node_for
+from typing_validation.cache import _TIERS
+from typing_validation.nodes import node_for
 
 from .cases import (
     INVALID,

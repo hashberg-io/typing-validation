@@ -14,10 +14,9 @@ them, and why it shares nothing with the interpreter.
 """
 
 import enum
-import typing
 from collections import defaultdict, deque
-from collections.abc import Callable as abc_Callable
 from collections.abc import (
+    Callable,
     Collection,
     Container,
     Iterable,
@@ -33,16 +32,25 @@ from types import GenericAlias
 from typing import (
     Annotated,
     Any,
+    ByteString,
+    final,
+    get_args,
+    get_origin,
+    is_protocol,
+    is_typeddict,
     Literal,
+    NamedTuple,
+    NewType,
     Self,
+    Tuple,
+    TypeAliasType,
     TypeVar,
     Union,
-    final,
-    is_typeddict,
 )
 
 from annotationlib import ForwardRef
 
+from . import cache
 from .plugins import (
     plugin_import,
     registered_components,
@@ -73,7 +81,7 @@ class TypeForm(enum.Enum):
     """A collection whose every item is checked against one type argument."""
 
     MAPPING = "mapping"
-    """A mapping whose keys and values are each checked against a type argument."""
+    """A mapping whose keys and values are each checked against an argument."""
 
     TUPLE = "tuple"
     """A fixed-length, variadic or empty tuple."""
@@ -127,7 +135,7 @@ class TypeForm(enum.Enum):
     """
 
     UNSUPPORTED = "unsupported"
-    """A type this library cannot validate against. Poisons whatever contains it."""
+    """A type we cannot validate against. Poisons whatever contains it."""
 
 
 _COLLECTION_ORIGINS = frozenset(
@@ -146,7 +154,7 @@ _COLLECTION_ORIGINS = frozenset(
 _MAPPING_ORIGINS = frozenset({dict, defaultdict, Mapping, MutableMapping})
 _ITERATOR_ORIGINS = frozenset({Iterator})
 _MAYBE_ITEM_ORIGINS = frozenset({Iterable, Container})
-_BYTESTRING_ORIGIN = typing.get_origin(typing.ByteString)
+_BYTESTRING_ORIGIN = get_origin(ByteString)
 
 
 @final
@@ -282,38 +290,9 @@ class TypeNode:
         return f"<TypeNode {self._t!r}: {self._form.value}{mark}>"
 
 
-_TIERS: list[dict[Any, TypeNode]] = [{}]
-"""
-The intern cache, innermost tier last.
-
-By default the cache lives forever and holds strong references, because types
-are usually module-level objects that outlive any cache anyway. Scoped caching
-pushes a tier; lookups consult the tiers innermost-first; every new node is
-created in the innermost tier; exiting drops that tier whole, in one operation,
-with no per-entry bookkeeping.
-
-The tiering is sound because **references only ever point outward**. A node
-created while a tier is active lives in that tier and may reference nodes in
-enclosing tiers, which outlive it. Nothing in an enclosing tier can reference
-into an inner one, because while the inner tier is active it is where all new
-nodes go. So dropping a tier can never leave a dangling reference behind it —
-and can never change an answer, only a cost.
-"""
-
-
-def _lookup(t: Any, /) -> TypeNode | None:
-    for tier in reversed(_TIERS):
-        node = tier.get(t)
-        if node is not None:
-            return node
-    return None
-
-
 def node_for(t: Any, /) -> TypeNode:
     """
     The interned node for a type, building it if it is not already cached.
-
-    :param t: the type to analyse.
     """
     fresh: list[TypeNode] = []
     node = _build(t, fresh)
@@ -332,7 +311,7 @@ def _build(t: Any, fresh: list[TypeNode], /) -> TypeNode:
     in the cache, even when unhashable leaves sit inside the cycle.
     """
     try:
-        cached = _lookup(t)
+        cached = cache.lookup(t)
     except TypeError:
         # Unhashable, and so unshareable: Annotated[int, {"ge": 0}] is exactly
         # the pydantic-style idiom the Annotated decision exists to accommodate,
@@ -346,7 +325,7 @@ def _build(t: Any, fresh: list[TypeNode], /) -> TypeNode:
     if cached is not None:
         return cached
     node = TypeNode(t)
-    _TIERS[-1][t] = node
+    cache.store(t, node)
     fresh.append(node)
     _analyse(node, fresh)
     return node
@@ -402,17 +381,16 @@ def _analyse(node: TypeNode, fresh: list[TypeNode], /) -> None:
     """
     t = node._t
     tt = type(t)
-
     if t is Any:
         node._form = TypeForm.ANY
         return
     if t is None or t is type(None):
         node._form = TypeForm.NONE
         return
-    if t is typing.NamedTuple:
+    if t is NamedTuple:
         node._form = TypeForm.ANY_NAMED_TUPLE
         return
-    if tt is typing.TypeAliasType:
+    if tt is TypeAliasType:
         node._form = TypeForm.ALIAS
         node._children = (_build(t.__value__, fresh),)
         return
@@ -423,18 +401,16 @@ def _analyse(node: TypeNode, fresh: list[TypeNode], /) -> None:
         elif t.__constraints__:
             node._children = (_build(Union[t.__constraints__], fresh),)
         return
-    if tt is typing.NewType:
+    if tt is NewType:
         node._form = TypeForm.NEW_TYPE
         node._children = (_build(t.__supertype__, fresh),)
         return
     if isinstance(t, (str, ForwardRef)):
         _unsupported(node, _INLINE_FORWARD_REF_REASON)
         return
-
     if tt is type or isinstance(t, type):
         _analyse_class(node, t, fresh)
         return
-
     if tt is GenericAlias:
         origin = t.__origin__
         args: tuple[Any, ...] = t.__args__
@@ -442,9 +418,8 @@ def _analyse(node: TypeNode, fresh: list[TypeNode], /) -> None:
         origin = Union
         args = t.__args__
     else:
-        origin = typing.get_origin(t)
-        args = typing.get_args(t)
-
+        origin = get_origin(t)
+        args = get_args(t)
     if origin is None:
         _unsupported(node)
     elif origin is Union:
@@ -477,9 +452,9 @@ def _analyse(node: TypeNode, fresh: list[TypeNode], /) -> None:
         node._children = tuple(_build(arg, fresh) for arg in args[:1])
     elif origin is _BYTESTRING_ORIGIN:
         node._form = TypeForm.CLASS
-    elif origin is abc_Callable:
+    elif origin is Callable:
         _unsupported(node, _CALLABLE_REASON)
-    elif type(origin) is typing.TypeAliasType:
+    elif type(origin) is TypeAliasType:
         node._form = TypeForm.ALIAS
         node._children = (_build(origin.__value__[args], fresh),)
     elif isinstance(origin, type):
@@ -499,7 +474,7 @@ def _analyse_class(node: TypeNode, t: Any, fresh: list[TypeNode], /) -> None:
         node._labels = tuple(names)
         node._children = tuple(children)
         return
-    if typing.is_protocol(t):
+    if is_protocol(t):
         if not getattr(t, "_is_runtime_protocol", False):
             _unsupported(node, _NON_RUNTIME_PROTOCOL_REASON)
             return
@@ -542,9 +517,9 @@ def _analyse_tuple(
 ) -> None:
     node._form = TypeForm.TUPLE
     if not args:
-        # Bare typing.Tuple means any tuple; tuple[()] means the empty tuple.
+        # Bare Tuple means any tuple; tuple[()] means the empty tuple.
         # Both record no arguments, so only the spelling tells them apart.
-        if t is typing.Tuple:
+        if t is Tuple:
             node._form = TypeForm.CLASS
         return
     if len(args) == 2 and args[1] is Ellipsis:

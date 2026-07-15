@@ -108,6 +108,9 @@ skip_missing_references: set[str] = {
     "PluginComponents",
     "typing_validation.plugins.PluginComponents",
     "ValidationFailure",
+    # Annotated under TYPE_CHECKING in the cache module, which sits below the
+    # node model and must not import it for real.
+    "TypeNode",
     # typing.NewType is a class in 3.14, and the stdlib inventory does not carry
     # it as the function the docstring naturally calls it.
     "typing.NewType",

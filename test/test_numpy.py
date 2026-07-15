@@ -11,7 +11,7 @@ bring to it.
 
 import subprocess
 import sys
-from typing import Any
+from typing import Any, Callable, Literal
 
 import numpy as np
 import pytest
@@ -92,8 +92,6 @@ class TestShape:
             validate(VECTOR, t)
 
     def test_a_literal_dimension(self) -> None:
-        from typing import Literal
-
         assert is_valid(
             MATRIX,
             np.ndarray[tuple[Literal[2], Literal[2]], np.dtype[np.uint8]],
@@ -138,8 +136,6 @@ class TestStructure:
         assert [c.t for c in node.children] == [tuple[int, int]]
 
     def test_totality_propagates_through_the_shape(self) -> None:
-        from typing import Callable
-
         t = np.ndarray.__class_getitem__(
             (tuple[Callable[[int], int]], np.dtype[np.uint8])
         )

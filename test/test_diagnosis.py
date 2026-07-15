@@ -13,7 +13,13 @@ from typing import Any, Iterator, Literal
 
 import pytest
 
-from typing_validation import ValidationError, validate, validated_iter
+from typing_validation import (
+    ValidationError,
+    is_valid,
+    validate,
+    validated_iter,
+)
+from typing_validation import validation
 from typing_validation.diagnosis import (
     Detail,
     DiagnosisFailure,
@@ -22,6 +28,10 @@ from typing_validation.diagnosis import (
 )
 
 from .cases import INVALID, JSON, Movie, Point, UserId
+
+
+def _must_not_be_called(*args: Any, **kwargs: Any) -> Any:
+    raise AssertionError("is_valid must not diagnose")
 
 
 def _fails(val: Any, t: Any) -> ValidationError:
@@ -240,12 +250,7 @@ class TestIsValidDoesNotDiagnose:
     ) -> None:
         # A caller who wants the explanation calls validate. v1 built the tree
         # here, so every miss paid for diagnostics nobody had asked for.
-        from typing_validation import is_valid, validation
-
-        def explode(*args: Any, **kwargs: Any) -> Any:
-            raise AssertionError("is_valid must not diagnose")
-
-        monkeypatch.setattr(validation, "diagnose", explode)
+        monkeypatch.setattr(validation, "diagnose", _must_not_be_called)
         assert is_valid("a", int) is False
 
 

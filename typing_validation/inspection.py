@@ -15,7 +15,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
-from .nodes import _TIERS, TypeNode, node_for
+from . import cache
+from .nodes import TypeNode, node_for
 
 __all__ = (
     "can_validate",
@@ -36,8 +37,6 @@ def inspect_type(t: Any, /) -> TypeNode:
     this be validated"* is then always "no", but it should never be an opaque
     "no" — use :meth:`~typing_validation.nodes.TypeNode.unsupported_components`
     to name the culprits.
-
-    :param t: the type to inspect.
     """
     return node_for(t)
 
@@ -57,8 +56,6 @@ def can_validate(t: Any, /) -> bool:
     returns :obj:`True` while this returns :obj:`False`. That is deliberate:
     scanning the type on every call is exactly the overhead that mechanism exists
     to avoid. This is the total answer, and it is the one to branch on.
-
-    :param t: the type to ask about.
     """
     return node_for(t).supported
 
@@ -72,8 +69,7 @@ def clear_cache() -> None:
     would be a semantic operation and no user could be expected to reason about
     it.
     """
-    for tier in _TIERS:
-        tier.clear()
+    cache.clear()
 
 
 def forget_type(t: Any, /) -> bool:
@@ -82,17 +78,8 @@ def forget_type(t: Any, /) -> bool:
 
     Returns whether anything was dropped. Note that nodes for its *components*
     are untouched and may still be shared by other types.
-
-    :param t: the type to forget.
     """
-    dropped = False
-    for tier in _TIERS:
-        try:
-            if tier.pop(t, None) is not None:
-                dropped = True
-        except TypeError:
-            return False
-    return dropped
+    return cache.forget(t)
 
 
 @contextmanager
@@ -118,8 +105,8 @@ def scoped_cache() -> Iterator[None]:
     active it is where all new nodes go. So dropping it can never leave a
     dangling reference — and can never change an answer, only a cost.
     """
-    _TIERS.append({})
+    cache.push_tier()
     try:
         yield
     finally:
-        _TIERS.pop()
+        cache.pop_tier()

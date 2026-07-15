@@ -17,11 +17,10 @@ binds this module to the other mechanisms, and the conformance suite is what
 keeps them honest.
 """
 
-import typing
 from collections import defaultdict, deque
-from collections.abc import Callable as abc_Callable
 from collections.abc import (
     Buffer,
+    Callable,
     Collection,
     Container,
     Iterable,
@@ -34,8 +33,23 @@ from collections.abc import (
     Set,
 )
 from types import GenericAlias
-from typing import Annotated, Any, Literal, TypeVar, Union, is_typeddict
-
+from typing import (
+    Annotated,
+    Any,
+    ByteString,
+    cast,
+    get_args,
+    get_origin,
+    is_protocol,
+    is_typeddict,
+    Literal,
+    NamedTuple,
+    NewType,
+    Tuple,
+    TypeAliasType,
+    TypeVar,
+    Union,
+)
 from annotationlib import ForwardRef
 
 from .diagnosis import diagnose
@@ -87,7 +101,7 @@ the test suite, which makes that bug unrepresentable rather than merely fixed.
 """
 
 _UNSUPPORTED_ORIGINS: dict[Any, str] = {
-    abc_Callable: (
+    Callable: (
         "Callability is checkable; signatures are not, in general. Checking "
         "only callable(val) while ignoring the signature would be a totality "
         "violation dressed as support."
@@ -101,7 +115,7 @@ generic-class arm and validate on ``isinstance(val, abc.Callable)``, which is
 the very half-support the form is refused for.
 """
 
-_BYTESTRING_ORIGIN = typing.get_origin(typing.ByteString)
+_BYTESTRING_ORIGIN = get_origin(ByteString)
 """
 What :obj:`typing.ByteString` unwraps to, which is the *deprecated*
 :class:`collections.abc.ByteString` rather than the
@@ -113,7 +127,7 @@ so the form is mapped to :class:`~collections.abc.Buffer` instead.
 """
 
 
-def validate(val: Any, t: Any, /) -> typing.Literal[True]:
+def validate(val: Any, t: Any, /) -> Literal[True]:
     """
     Validate a value against a type, raising if it does not conform.
 
@@ -122,8 +136,6 @@ def validate(val: Any, t: Any, /) -> typing.Literal[True]:
 
         assert validate(val, t)
 
-    :param val: the value to validate.
-    :param t: the type to validate it against.
     :raises ValidationError: if the value is not valid for the type.
     :raises UnsupportedTypeError: if the type, or any component of it, is not
         one this library can validate against.
@@ -152,8 +164,6 @@ def is_valid(val: Any, t: Any, /) -> bool:
     failure tree here, which made every miss pay for diagnostics nobody had
     asked for. A caller who wants a boolean gets a boolean at boolean prices.
 
-    :param val: the value to validate.
-    :param t: the type to validate it against.
     :raises UnsupportedTypeError: if the type, or any component of it, is not
         one this library can validate against. An unsupported type is not an
         invalid value, and is not reported as :obj:`False`.
@@ -168,12 +178,10 @@ def validated[T](val: Any, t: type[T], /) -> T:
     """
     Validate a value against a type and return it, for use in an expression.
 
-    :param val: the value to validate.
-    :param t: the type to validate it against.
     :raises ValidationError: if the value is not valid for the type.
     """
     if _check(val, t):
-        return typing.cast(T, val)
+        return cast(T, val)
     raise ValidationError(val, t, diagnose(val, t))
 
 
@@ -187,14 +195,12 @@ def validated_iter[T](val: Iterable[T], t: Any, /) -> Iterable[T]:
     ``Iterator[T]`` leaves its item type unchecked. Checking each item on its way
     past costs the caller nothing they were not already paying.
 
-    :param val: the iterable whose items to validate.
-    :param t: the iterable type to validate against, such as ``Iterator[int]``.
     :raises ValidationError: if the value is not an instance of the type's
         origin, or — when an invalid item is reached, at the point it is
         reached.
     :raises UnsupportedTypeError: if the type is not a parametrised iterable.
     """
-    origin = typing.get_origin(t)
+    origin = get_origin(t)
     if (
         origin not in _ITEM_ORIGINS
         and origin not in _ITERATOR_ORIGINS
@@ -207,9 +213,9 @@ def validated_iter[T](val: Iterable[T], t: Any, /) -> Iterable[T]:
         )
     if not isinstance(val, origin):
         raise ValidationError(val, t)
-    args = typing.get_args(t)
+    args = get_args(t)
     if not args:
-        return typing.cast(Iterable[T], val)
+        return cast(Iterable[T], val)
     return _validated_iter(val, args[0])
 
 
@@ -253,7 +259,6 @@ def _check(val: Any, t: Any, /) -> bool:
             return True
         val, t = stack.pop()
         tt = type(t)
-
         if tt is type:
             # Plain classes, bare builtin collections, and NamedTuple
             # subclasses. The overwhelmingly common case, and the only arm that
@@ -286,9 +291,8 @@ def _check(val: Any, t: Any, /) -> bool:
                 origin = Union
                 args = t.__args__
             else:
-                origin = typing.get_origin(t)
-                args = typing.get_args(t)
-
+                origin = get_origin(t)
+                args = get_args(t)
             if origin is None:
                 # Any and None are inlined rather than delegated: they are
                 # identity tests on singletons, so they cannot shadow anything,
@@ -349,10 +353,10 @@ def _check(val: Any, t: Any, /) -> bool:
                 if isinstance(val, tuple):
                     if not args:
                         # tuple[()] means the empty tuple, while bare
-                        # typing.Tuple means any tuple — and both record no
+                        # Tuple means any tuple — and both record no
                         # arguments at all, so only the spelling tells them
-                        # apart. typing.Tuple is a singleton, so identity does.
-                        if t is typing.Tuple or not val:
+                        # apart. Tuple is a singleton, so identity does.
+                        if t is Tuple or not val:
                             continue
                     elif len(args) == 2 and args[1] is Ellipsis:
                         item_t = args[0]
@@ -414,7 +418,7 @@ def _check(val: Any, t: Any, /) -> bool:
             elif origin in _UNSUPPORTED_ORIGINS:
                 raise UnsupportedTypeError(t, _UNSUPPORTED_ORIGINS[origin])
 
-            elif type(origin) is typing.TypeAliasType:
+            elif type(origin) is TypeAliasType:
                 # A generic alias: type Pair[T] = tuple[T, T]. Subscripting the
                 # alias's value substitutes the arguments for its parameters.
                 stack.append((val, origin.__value__[args]))
@@ -426,7 +430,6 @@ def _check(val: Any, t: Any, /) -> bool:
 
             else:
                 raise UnsupportedTypeError(t)
-
         if _backtrack(stack, unions):
             continue
         return False
@@ -441,7 +444,7 @@ def _check_bare(
 
     Returns whether the check succeeded, having pushed any further obligations.
     """
-    if tt is typing.TypeAliasType:
+    if tt is TypeAliasType:
         # Not transparent: type MyInt = int keeps its own identity and reports as
         # itself. It is also where a recursive type closes its cycle.
         stack.append((val, t.__value__))
@@ -459,23 +462,23 @@ def _check_bare(
             stack.append((val, Union[constraints]))
             return True
         return True
-    if tt is typing.NewType:
+    if tt is NewType:
         # Vacuous beyond the supertype: NewType's constructor is the identity
         # function and isinstance against it raises, so there is no runtime
         # witness of the distinction. The type is not stripped, so failures
         # report UserId rather than int.
         stack.append((val, t.__supertype__))
         return True
-    if t is typing.NamedTuple:
+    if t is NamedTuple:
         # "Any named tuple instance", which is what type checkers enforce. There
-        # is no nominal marker to check — typing.NamedTuple is a function, and
+        # is no nominal marker to check — NamedTuple is a function, and
         # never appears in a named tuple's __mro__ — so the structural probe is
         # the only runtime witness there is.
         return isinstance(val, tuple) and hasattr(type(val), "_fields")
     if isinstance(t, type):
         if is_typeddict(t):
             return _check_typed_dict(val, t, stack)
-        if typing.is_protocol(t):
+        if is_protocol(t):
             if not getattr(t, "_is_runtime_protocol", False):
                 raise UnsupportedTypeError(
                     t,

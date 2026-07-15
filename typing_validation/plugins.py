@@ -17,6 +17,8 @@ anything for its existence.
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from . import cache
+
 __all__ = (
     "plugin_import",
     "register_validator",
@@ -109,13 +111,12 @@ def register_validator(
     ``__validate_components__`` classmethod. Both take the same arguments and
     mean the same thing.
 
-    :param cls: the class, unparametrised — ``numpy.ndarray``, not
-        ``numpy.ndarray[shape, dtype]``.
-    :param check: given a value and the type arguments, whether the value is
-        valid.
-    :param components: optionally, which of the type arguments the core
-        validates, so that totality propagates through them. See
-        :data:`~typing_validation.plugins.PluginComponents`.
+    ``cls`` is the class unparametrised — ``numpy.ndarray``, not
+    ``numpy.ndarray[shape, dtype]``. ``components`` is optional and says which
+    of the type arguments the core validates, so that totality propagates
+    through them; see :data:`~typing_validation.plugins.PluginComponents` for
+    why the core cannot work that out for itself.
+
     :raises TypeError: if ``cls`` is not a class, or either callable is not.
     """
     if not isinstance(cls, type):
@@ -146,21 +147,13 @@ def _invalidate_nodes() -> None:
     at import time and approximately never after, so the cost is nil, and
     working out precisely which nodes a new validator affects means walking the
     whole graph anyway.
-
-    The import is local because the node model depends on this module, and the
-    dependency may not run the other way at module level.
     """
-    from .nodes import _TIERS
-
-    for tier in _TIERS:
-        tier.clear()
+    cache.clear()
 
 
 def registered_validator(cls: type, /) -> PluginCheck | None:
     """
     The validator registered for a class, or :obj:`None` if there is none.
-
-    :param cls: the unparametrised class.
     """
     return _REGISTRY.get(cls)
 
@@ -168,8 +161,6 @@ def registered_validator(cls: type, /) -> PluginCheck | None:
 def registered_components(cls: type, /) -> PluginComponents | None:
     """
     The component declaration for a class, or :obj:`None` if it made none.
-
-    :param cls: the unparametrised class.
     """
     declared = _COMPONENTS.get(cls)
     if declared is not None:
@@ -187,8 +178,6 @@ def plugin_import(origin: Any, /) -> str | None:
     leaving them unchecked would report success we had not earned. Answering
     non-:obj:`None` here is therefore what turns an unregistered parametrised
     class from *"arguments unchecked, by design"* into an error.
-
-    :param origin: the unparametrised class.
     """
     module = getattr(origin, "__module__", "")
     return _PLUGINS.get(module.split(".")[0])
@@ -200,8 +189,6 @@ def unsupported_explanation(origin: Any, /) -> str:
 
     Every unsupported-generic error should teach, which v1's flat *"Unsupported
     validation for type X"* never did.
-
-    :param origin: the unparametrised class that has no validator.
     """
     module = getattr(origin, "__module__", "")
     qualname = getattr(origin, "__qualname__", repr(origin))

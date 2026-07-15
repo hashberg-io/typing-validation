@@ -19,11 +19,20 @@ field turns that opaque crash into a precise report, and lets the unresolvable
 field poison only the type that contains it.
 """
 
-import typing
 from collections.abc import Mapping
 from types import GenericAlias
-from typing import Annotated, Any, Union
-
+from typing import (
+    Annotated,
+    Any,
+    get_args,
+    get_origin,
+    Literal,
+    NamedTuple,
+    NotRequired,
+    ReadOnly,
+    Required,
+    Union,
+)
 from annotationlib import ForwardRef, Format, get_annotations
 
 __all__ = (
@@ -33,7 +42,7 @@ __all__ = (
     "strip_qualifiers",
 )
 
-_QUALIFIERS = frozenset({typing.Required, typing.NotRequired, typing.ReadOnly})
+_QUALIFIERS = frozenset({Required, NotRequired, ReadOnly})
 """
 The :class:`~typing.TypedDict` qualifiers, none of which bears on the shape of a
 value.
@@ -55,8 +64,8 @@ def strip_qualifiers(ann: Any, /) -> Any:
 
     They nest — ``NotRequired[ReadOnly[float]]`` is legal — so this loops.
     """
-    while typing.get_origin(ann) in _QUALIFIERS:
-        (ann,) = typing.get_args(ann)
+    while get_origin(ann) in _QUALIFIERS:
+        (ann,) = get_args(ann)
     return ann
 
 
@@ -82,9 +91,6 @@ def resolve(ann: Any, owner: Any, /) -> Any:
     annotation it came from. An inline ``validate(x, list["JSON"])`` has no
     owner, and that — rather than the shape of the reference — is why it cannot
     be resolved.
-
-    :param ann: the annotation to resolve.
-    :param owner: the class whose annotation this is.
     """
     if isinstance(ann, str):
         ann = ForwardRef(ann, owner=owner)
@@ -93,8 +99,8 @@ def resolve(ann: Any, owner: Any, /) -> Any:
         if isinstance(resolved, ForwardRef):
             return resolved
         return resolve(resolved, owner)
-    origin = typing.get_origin(ann)
-    if origin is typing.Literal:
+    origin = get_origin(ann)
+    if origin is Literal:
         # A literal's arguments are values, not types. Resolving them would read
         # the 'a' of Literal['a'] as a forward reference to a class named a.
         return ann
@@ -103,7 +109,7 @@ def resolve(ann: Any, owner: Any, /) -> Any:
         if base is ann.__origin__:
             return ann
         return Annotated[(base, *ann.__metadata__)]
-    args = typing.get_args(ann)
+    args = get_args(ann)
     if not args:
         return ann
     new_args = tuple(
@@ -126,8 +132,6 @@ def field_annotations(t: Any, /) -> Mapping[str, Any]:
     The annotations of a :class:`~typing.TypedDict` or
     :class:`~typing.NamedTuple` class, exactly as recorded: qualifiers intact,
     forward references unresolved, inherited fields included.
-
-    :param t: the class whose fields to read.
     """
     return get_annotations(t, format=Format.FORWARDREF)
 
@@ -145,8 +149,6 @@ def resolved_field_annotations(t: Any, /) -> Mapping[str, Any]:
     Resolution happens before stripping, because a qualifier may itself have
     been written as a reference — ``"Required[int]"`` resolves to
     ``Required[int]`` and only then has a qualifier to strip.
-
-    :param t: the class whose fields to read.
     """
     return {
         name: strip_qualifiers(resolve(ann, t))
