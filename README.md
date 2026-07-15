@@ -35,6 +35,7 @@ The full API documentation is available at
 ## Structure
 
 - `typing_validation/` — the package source.
+- `knowledge/` — design documents: the architecture, and the catalogue of supported type forms.
 - `docs/` — the Sphinx documentation pipeline.
 
 ## License
