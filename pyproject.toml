@@ -55,6 +55,21 @@ only-include = ["typing_validation", "README.md", "LICENSE"]
 
 [dependency-groups]
 dev = ["pytest >=8.0", "mypy >=1.14", "black >=24.0", "numpy >=2.0"]
+peers = [
+    # The libraries `benchmark/tools/contenders.py` measures against. A group of
+    # their own, not part of `dev`: the conformance suite does not need them, and
+    # CI should not install ten third-party packages to run it. Every one is
+    # optional at runtime — `contenders.py` skips any that will not import, so
+    # `python -m benchmark` degrades to whatever is present rather than failing,
+    # and says in the report that it did.
+    "beartype >=0.19",
+    "cattrs >=24.1",
+    "msgspec >=0.19",
+    "pydantic >=2.10",
+    "trycast >=1.2",
+    "typedload >=2.30",
+    "typeguard >=4.4",
+]
 docs = [
     "sphinx",
     "sphinx-rtd-theme",

@@ -3,12 +3,17 @@
 """
 Running the suite: ``python -m benchmark``.
 
+The only entry point, and thin on purpose: parse the arguments, run the pipeline
+once, render what it measured, and put the result where it was asked to go. The
+same numbers reach the terminal and the file, because there is only one set of
+them.
+
 Units are **nanoseconds per call** — the number a user actually experiences —
-and **nanoseconds per type-node visited**, for comparing across shapes. Neither
-is divided by anything the caller does not control, which is where v1's ``ns/B``
-went wrong: it divided by ``sys.getsizeof``, so its figures moved with the
-magnitude of an integer while the work stayed constant, and could not be compared
-across types at all.
+and **per type-node visited**, for comparing across shapes. Neither is divided by
+anything the caller does not control, which is where v1's ``ns/B`` went wrong: it
+divided by ``sys.getsizeof``, so its figures moved with the magnitude of an
+integer while the work stayed constant, and could not be compared across types at
+all.
 
 Results are printed and tracked over time rather than gated in CI: a hard
 threshold on a noisy shared runner produces flakes and then gets disabled, which
@@ -17,74 +22,48 @@ is worse than not having it.
 
 import argparse
 import pathlib
-import timeit
-from typing import Any, Callable
+import sys
+from typing import Any
 
-from typing_validation import clear_cache, is_valid, validate, validator
+from .tools.report import render
+from .tools.suite import regressions, run
 
-from .cases import Case, cases
-from .measure import measure
-from .table import render
-from .environment import describe, environment
-from .v1 import load_v1
+REPORT = pathlib.Path(__file__).parent / "REPORT.md"
+"""Where the report lives, next to the suite that produced it."""
 
 
-def _time(fn: Callable[[], Any], repeats: int, /) -> float:
-    """Nanoseconds per call, taking the best of several rounds."""
-    timer = timeit.Timer(fn)
-    rounds = 5
-    best = min(timer.repeat(repeat=rounds, number=repeats))
-    return best / repeats * 1e9
-
-
-def _swallow(fn: Callable[[], Any], /) -> None:
+def _utf8(stream: Any, /) -> None:
     """
-    Run something and discard its failure, so the failure path measures the work
-    rather than the traceback.
+    Say what encoding the report is in, rather than inheriting one.
+
+    The report is full of ``µs``, ``—`` and ``⚠``, and a Windows console is
+    cp1252, which has none of them. Left alone, the suite runs for minutes and
+    then dies on the last line, printing the report it spent that long
+    measuring — and the same silence applies to the file, which is why writing
+    it names its encoding too.
     """
-    try:
-        fn()
-    except Exception:
-        pass
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(encoding="utf-8")
 
 
-def _build(t: Any, /) -> None:
-    """
-    Analyse a type from cold and compose a validator for it.
-
-    The cache is cleared first, or this would measure a dictionary lookup: the
-    second `validator(list[int])` in a process reuses the closure the first one
-    composed, which is the point of interning and the opposite of what the
-    construction cost means.
-    """
-    clear_cache()
-    validator(t)
+def _progress(line: str, /) -> None:
+    # To stderr, so that `python -m benchmark > somewhere` is the report and
+    # nothing else. The suite takes minutes, and silence for minutes is
+    # indistinguishable from a hang.
+    print(line, file=sys.stderr, flush=True)
 
 
-def _row(name: str, value: float | None, per_node: float | None = None) -> str:
-    if value is None:
-        return f"    {name:34} {'n/a':>12}"
-    cell = f"{value:>9.1f} ns"
-    if per_node is not None:
-        cell += f"  {per_node:>7.2f} ns/node"
-    return f"    {name:34} {cell}"
-
-
-def _write(args: argparse.Namespace, /) -> None:
-    """Measure everything and put the table where a reader will find it."""
-    v1 = load_v1()
-    selected = [c for c in cases() if args.filter in c.name]
-    results = []
-    for case in selected:
-        print(f"  measuring {case.name} ...")
-        results.append(measure(case, args.repeats, v1))
-    out = pathlib.Path(__file__).parent / "RESULTS.md"
-    out.write_text(render(results, environment()))
-    print(f"\nwrote {out}")
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="The benchmark suite.")
+    parser.add_argument(
+        "--write",
+        action="store_true",
+        help=f"write {REPORT.name} instead of printing the report",
+    )
+    parser.add_argument(
+        "--filter", default="", help="only run cases whose name contains this"
+    )
     parser.add_argument(
         "--repeats",
         type=int,
@@ -92,89 +71,42 @@ def main() -> None:
         help="calls per timing round (default: 2000)",
     )
     parser.add_argument(
-        "--filter", default="", help="only run cases whose name contains this"
+        "--no-peers",
+        action="store_true",
+        help="skip the ecosystem half, which needs `uv sync --group peers`",
     )
     parser.add_argument(
-        "--write",
+        "--no-extended",
         action="store_true",
-        help="write benchmark/RESULTS.md instead of printing",
+        help="measure the peers on the flat corpus only",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    _utf8(sys.stdout)
+    _utf8(sys.stderr)
+    report = run(
+        args.repeats,
+        only=args.filter,
+        with_peers=not args.no_peers,
+        with_extended=not args.no_extended,
+        progress=_progress,
+    )
+    text = render(report)
     if args.write:
-        _write(args)
-        return
-    env = environment()
-    print("Environment")
-    print(describe(env))
-    v1 = load_v1()
-    print(f"\n  v1 for comparison: {getattr(v1, '__version__', 'unavailable')}")
-    print(
-        "\nns/call is what a user experiences; ns/node compares across shapes."
-    )
-    regressions: list[str] = []
-    selected = [c for c in cases() if args.filter in c.name]
-    for case in selected:
-        print(f"\n  {case.name}  ({case.nodes} nodes)")
-        n = case.repeats if hasattr(case, "repeats") else args.repeats
-        n = max(50, n // max(1, case.nodes // 50))
-        ours = _time(lambda: validate(case.valid, case.t), n)
-        print(_row("validate (valid)", ours, ours / case.nodes))
-        ours_bad = _time(
-            lambda: _swallow(lambda: validate(case.invalid, case.t)), n
-        )
-        # The failure path pays for a second traversal, on the assumption that
-        # failures are exceptional so paying twice is free. An assumption in a
-        # performance argument is exactly what a benchmark is for.
-        print(_row("validate (invalid, + diagnose)", ours_bad))
-        is_valid_bad = _time(lambda: is_valid(case.invalid, case.t), n)
-        print(_row("is_valid (invalid, no diagnose)", is_valid_bad))
-        if case.baseline is not None:
-            hand = _time(lambda: case.baseline(case.valid), n)  # type: ignore[misc]
-            print(_row("hand-written", hand, hand / case.nodes))
-            print(
-                f"    {'-> validate is':34} {ours / hand:>9.1f}x hand-written"
-            )
-        built = _time(lambda: _build(case.t), max(20, n // 20))
-        check = validator(case.t)
-        theirs_ours = _time(lambda: check(case.valid), n)
-        print(_row("validator (valid)", theirs_ours, theirs_ours / case.nodes))
-        print(_row("validator (construction)", built))
-        # The only number that answers the question a user actually has — which
-        # of these should I use — and it turns the choice from folklore into a
-        # lookup. Arithmetic, given a construction cost and two per-call costs:
-        # the point where the cheaper call has repaid the analysis.
-        saved = ours - theirs_ours
-        if saved > 0:
-            print(
-                f"    {'-> validator repays after':34} "
-                f"{built / saved:>9.0f} values"
-            )
-        else:
-            print(f"    {'-> validator never repays here':34} {'':>9}")
-        if v1 is not None and case.v1_comparable:
-            try:
-                v1.validate(case.valid, case.t)
-            except Exception:
-                print(_row("v1 (unsupported)", None))
-                continue
-            theirs = _time(lambda: v1.validate(case.valid, case.t), n)
-            print(_row("v1 validate (valid)", theirs, theirs / case.nodes))
-            ratio = theirs / ours
-            verdict = f"{ratio:.2f}x v1"
-            if ratio < 1.0:
-                verdict += "  <-- SLOWER THAN v1"
-                regressions.append(case.name)
-            print(f"    {'-> validate is':34} {verdict:>9}")
-    print("\n" + "=" * 66)
-    if regressions:
-        # The number that matters most. validate is the function everybody calls
-        # and most people will only ever call: if the redesign buys two new
-        # mechanisms at the cost of the common path, it has failed regardless of
-        # what the other two achieve.
-        print("REGRESSED AGAINST v1: " + ", ".join(regressions))
+        REPORT.write_text(text, encoding="utf-8")
+        _progress(f"\nwrote {REPORT}")
     else:
-        print("No regression against v1 on any comparable case.")
+        print(text)
+    # The one number that may never regress, said out loud at the end rather
+    # than left in a table for someone to find. It does not fail the run: the
+    # suite is tracked over time rather than gated, and a threshold that fails
+    # is a threshold that gets disabled.
+    slower = regressions(report)
+    if slower:
+        _progress("REGRESSED AGAINST v1: " + ", ".join(slower))
+    else:
+        _progress("No regression against v1 on any comparable case.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

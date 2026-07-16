@@ -238,7 +238,7 @@ Three corrections, all from measuring.
 
 A type with nothing to unroll — a literal, a structured union, a cycle, a plugin — would emit a function whose entire body is one call into the composed validator. That is §3.3 plus a function call, and it measures slower than §3.3: `Literal[1, 2, 3]` was 79 ns compiled against 71 composed. So `compiled_validator(t)` returns `validator(t)` outright in that case.
 
-Which means the honest statement of what this mechanism buys is narrower than the section implies: **it is worth having exactly where there is structure to unroll.** The published table (`benchmark/RESULTS.md`) says where that is, per type, and says `never` where it is not.
+Which means the honest statement of what this mechanism buys is narrower than the section implies: **it is worth having exactly where there is structure to unroll.** The published table (`benchmark/REPORT.md`) says where that is, per type, and says `never` where it is not.
 
 #### One function, not a set of them
 
