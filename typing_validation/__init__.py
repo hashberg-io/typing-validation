@@ -17,7 +17,7 @@ from .nodes import TypeForm, TypeNode
 from .plugins import register_validator
 from .validation import is_valid, validate, validated, validated_iter
 
-__version__ = "2.2.0"
+__version__ = "2.2.1"
 
 __all__ = (
     "Detail",
