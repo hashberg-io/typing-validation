@@ -109,7 +109,7 @@ def _blacks_own(source: str) -> set[int]:
 
 @pytest.mark.parametrize("path", _files(), ids=lambda p: p.name)
 def test_no_blank_lines_inside_function_bodies(path: pathlib.Path) -> None:
-    source = path.read_text()
+    source = path.read_text(encoding="utf-8-sig")
     lines = source.splitlines()
     in_string = _string_lines(source)
     forced = _blacks_own(source)
@@ -148,7 +148,7 @@ def test_docstrings_do_not_talk_about_other_releases(
     which is read by the person it is for.
     """
     offenders: list[str] = []
-    for node in ast.walk(ast.parse(path.read_text())):
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8-sig"))):
         if not isinstance(
             node,
             (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Module),
@@ -174,7 +174,7 @@ def test_no_param_or_return_fields_in_docstrings(path: pathlib.Path) -> None:
     and the annotation is the one that cannot go stale.
     """
     offenders: list[str] = []
-    for node in ast.walk(ast.parse(path.read_text())):
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8-sig"))):
         if not isinstance(
             node,
             (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Module),

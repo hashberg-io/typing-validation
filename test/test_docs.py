@@ -52,7 +52,7 @@ def _pages() -> list[pathlib.Path]:
 
 @pytest.mark.parametrize("page", _pages(), ids=lambda p: p.stem)
 def test_every_cross_reference_is_clickable(page: pathlib.Path) -> None:
-    text = re.sub(r"\s+", " ", page.read_text())
+    text = re.sub(r"\s+", " ", page.read_text(encoding="utf-8"))
     dead = {
         name
         for linked, name in XREF.findall(text)
@@ -72,7 +72,7 @@ def test_the_skip_list_stays_small() -> None:
     It reads like a warning filter and is not: it is a list of references the
     project has given up on. Adding to it should feel expensive.
     """
-    conf = (ROOT / "docs" / "conf.py").read_text()
+    conf = (ROOT / "docs" / "conf.py").read_text(encoding="utf-8")
     body = conf[
         conf.index("skip_missing_references") : conf.index("# Anything else")
     ]
