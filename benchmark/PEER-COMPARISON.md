@@ -209,7 +209,7 @@ Every one is a boundary `knowledge/TYPES.md` documents in advance:
 | protocols                      | `isinstance` against a runtime protocol is already one call |
 | scalars                        | one `isinstance`; nothing to unroll                         |
 
-Where there is nothing to unroll the wrapper is not free: the slowest cases run at about **0.85×**, and they are a NumPy array, a `Checked[list[int]]` behind `__validate__`, a recursive alias, and a hundred-deep nested list — a plugin, an opaque call, a cycle, and CPython's refusal of more than a hundred levels of indentation. Four boundaries, all of them written down before they were measured.
+Where there is nothing to unroll the wrapper is not free: the slowest cases run at about **0.85×**, and they are a NumPy array, a `Checked[list[int]]` behind `__validate__`, a recursive alias, and a hundred-deep nested list — a plugin, an opaque call, a cycle, and CPython's refusal of more than about twenty statically nested blocks. Four boundaries, all of them written down before they were measured.
 
 **The compiler stops exactly where the design says it stops.**
 That correspondence — between a spec written in advance and a measurement taken after — is the best evidence in this review that the architecture is what it claims to be, and it is the one claim here that reproduced on both machines the corpus has been run on: 20 cases unroll and 35 do not, on each.

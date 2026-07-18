@@ -54,6 +54,7 @@ from typing import (
 from annotationlib import ForwardRef
 
 from . import _cache as cache
+from ._display import safe_repr
 from .plugins import (
     plugin_import,
     registered_components,
@@ -313,7 +314,7 @@ class TypeNode:
 
     def __repr__(self) -> str:
         mark = "" if self._supported else ", unsupported"
-        return f"<TypeNode {self._t!r}: {self._form.value}{mark}>"
+        return f"<TypeNode {safe_repr(self._t)}: {self._form.value}{mark}>"
 
 
 def node_for(t: Any, /) -> TypeNode:

@@ -11,6 +11,8 @@ never be able to mistake one for the other.
 
 from typing import TYPE_CHECKING, Any, Self, final
 
+from ._display import safe_repr
+
 if TYPE_CHECKING:
     from .diagnosis import ValidationFailure
 
@@ -62,7 +64,7 @@ class UnsupportedTypeError(NotImplementedError):
         return self._explanation
 
     def __str__(self) -> str:
-        msg = f"Unsupported validation for type {self._t!r}."
+        msg = f"Unsupported validation for type {safe_repr(self._t)}."
         if self._explanation is not None:
             msg += "\n" + self._explanation
         return msg
@@ -135,4 +137,7 @@ class ValidationError(TypeError):
     def __str__(self) -> str:
         if self._failure is not None:
             return str(self._failure)
-        return f"For type {self._t!r}, invalid value: {self._val!r}"
+        return (
+            f"For type {safe_repr(self._t)}, invalid value: "
+            f"{safe_repr(self._val)}"
+        )

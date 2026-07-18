@@ -72,10 +72,20 @@ TYPES: list[Any] = [
     Rec,
     list[int | None],
     tuple[list[int], dict[str, int]],
+    type,
+    type[int],
+    type[int | str],
+    type[list[int]],
 ]
 """
 Types spanning every arm the interpreter has, weighted toward the ones with
 non-trivial control flow: unions with structured members, and recursion.
+
+``type[list[int]]`` is here precisely because it is *unsupported*. An
+unsupported type still has to be refused by every mechanism at once, and this
+harness is what noticed that it was not: the interpreter used to reject a
+non-class value before discovering it could not honour the type at all, so it
+answered where the others raised.
 """
 
 
@@ -101,6 +111,11 @@ def _values(rng: random.Random) -> list[Any]:
         {"a": 1},
         {"a": "b"},
         {1: 1},
+        int,
+        bool,
+        str,
+        list,
+        list[int],
     ]
     out = list(leaves)
     for _ in range(60):
