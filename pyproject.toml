@@ -40,6 +40,30 @@ python_version = "3.14"
 strict = true
 files = ["typing_validation", "test", "benchmark"]
 
+[[tool.mypy.overrides]]
+# The peer libraries are an optional group, and `contenders.py` imports every
+# one of them inside a `try`/`except ImportError` precisely so that they can be
+# absent. Type checking runs where they are, which is anywhere but a machine
+# that has installed the `peers` group -- CI deliberately does not, so without
+# this mypy fails on ten imports that are working as designed.
+module = [
+    "beartype",
+    "beartype.*",
+    "cattrs",
+    "cattrs.*",
+    "msgspec",
+    "msgspec.*",
+    "pydantic",
+    "pydantic.*",
+    "trycast",
+    "trycast.*",
+    "typedload",
+    "typedload.*",
+    "typeguard",
+    "typeguard.*",
+]
+ignore_missing_imports = true
+
 [tool.pyright]
 typeCheckingMode = "off"
 reportInvalidTypeForm = false
