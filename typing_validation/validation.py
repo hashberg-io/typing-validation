@@ -549,22 +549,49 @@ def _check_type_of(val: Any, t: Any, args: tuple[Any, ...], /) -> bool:
     ``T`` may be a class, a union of classes, or :obj:`~typing.Any`. Anything
     else — ``Type[list[int]]`` and friends — is unsupported: :func:`issubclass`
     cannot express it, and inventing a bespoke subtype relation is out of scope.
+
+    The argument is judged before the value, and the order is the whole point.
+    Laziness (``TYPES.md``, *When the error surfaces*) lets a value be rejected
+    before an unsupported component is reached — but that component must be one
+    the walk had yet to *reach*. Here it is this node: an unparametrisable ``T``
+    makes the whole ``Type[T]`` unsupported, with no supported outer layer whose
+    obligation ``isinstance(val, type)`` could be discharging. Testing the value
+    first made the verdict on the *type* depend on the value, so
+    ``Type[list[int]]`` was unsupported against one value and merely invalid
+    against another — and diagnosis, which reads the type alone, could not
+    reproduce the second and reported itself as a bug.
     """
+    target = _type_of_target(t, args)
     if not isinstance(val, type):
         return False
-    if not args:
+    if target is None:
         return True
+    return issubclass(val, target)
+
+
+def _type_of_target(
+    t: Any, args: tuple[Any, ...], /
+) -> type | tuple[type, ...] | None:
+    """
+    What ``Type[T]`` requires the value to be a subclass of, or :obj:`None` when
+    it requires nothing beyond being a class.
+
+    :raises UnsupportedTypeError: if ``T`` is anything :func:`issubclass` cannot
+        take.
+    """
+    if not args:
+        return None
     (arg,) = args
     if arg is Any:
-        return True
+        return None
     if type(arg) is type:
-        return issubclass(val, arg)
+        return arg
     if type(arg) is Union:  # type: ignore[comparison-overlap]
         members = arg.__args__
         for member in members:
             if type(member) is not type:
                 raise UnsupportedTypeError(t, _TYPE_ARG_EXPLANATION)
-        return issubclass(val, members)
+        return members  # type: ignore[no-any-return]
     raise UnsupportedTypeError(t, _TYPE_ARG_EXPLANATION)
 
 
