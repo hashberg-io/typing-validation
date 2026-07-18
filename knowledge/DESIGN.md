@@ -280,7 +280,7 @@ The same applies to everything that *reads* the tree — its `walk`, its `repr`,
 
 The lesson generalises past this section: **iterative-because-the-value-is-deep is a property of every artifact shaped like the value**, not just of the validators.
 
-The message format is deliberately unsettled. See §14.
+The message format is settled. See §14.
 
 ## 4. The type node model
 
@@ -306,7 +306,7 @@ Unions are the *only* form Python merges, and it does the rest of the work too: 
 
 Three problems dissolve with it. Aliases carry `__name__` (`repr(JSON)` is literally `JSON`), so recursion roots get real names for free — no non-identity-bearing label field, no walk-order dependence on which of two equal aliases wins. `NewType` carries `__supertype__`, so it displays as itself and checks as its supertype. And metadata is identity-bearing from day one, so the `Annotated` door stays open without a future cache-key migration.
 
-Each node keeps the `t` it was built from, so display is `repr(t)`.
+Each node keeps the `t` it was built from, so display is `repr(t)` — guarded, since `t` is caller-supplied and its `__repr__` may raise. See §14.
 
 **The price**, paid knowingly: for unions the first-interned spelling wins the display, so `validate(x, Union[str, int])` may report `int | str`. This is forced — Python considers them equal and hashes them equally, so any cache keyed on `t` merges them — and defensible, since they *are* the same type.
 
@@ -832,7 +832,7 @@ A persistent cache for stage 3's output, so that compile latency is paid once ac
 
 The **mechanism** is settled. `marshal` handles code objects, but `co_consts` admits only `None`, `bool`, `int`, `float`, `complex`, `str`, `bytes`, `tuple`, `frozenset`, `code` and `Ellipsis`. A type — `int`, a user class, an enum member inside a `Literal` — can never be a constant; in generated source it compiles to a `LOAD_GLOBAL` resolved against the globals handed to `exec`. So the persisted artifact is two parts: **the marshalled code, plus a recipe for rebuilding its environment** — a mapping from generated names to either inline marshalable constants or resolvable references like `module:qualname`.
 
-This is convenient given §3.4 already emits a *set* of mutually-referencing functions rather than one: each is separately a code object, and the recipe maps names to them, cycles included.
+This section was written expecting §3.4 to emit a *set* of mutually-referencing functions, one per recursion root, each separately a code object, so that the recipe could map names to them with cycles included. **It emits one function.** Marshalling must not assume otherwise: there is a single code object to persist, and the back-edges a cycle needs are closed inside it rather than across a set of names. See §3.4.
 
 The **hard part is unsolved, and it is why this is last.** Staleness. What invalidates a cached validator for `list[MyClass]`? The class's identity does not survive across processes. Its `__mro__` may have changed since the bytecode was written. After a refactor, a *different* class can hold the same qualified name — and then the cached validator is silently wrong, which is the worst failure mode this library has. `__pycache__` solves the analogous problem with source path, mtime and size; our inputs are not files, so that answer does not transfer. There is no design here yet, only a requirement: **a stale entry must be detected, never trusted.**
 
@@ -893,20 +893,19 @@ Part of the contract, not a preference — §8 shows what happens when a library
 
 ## 14. Open questions
 
-### The `diagnose` message format
+### ~~The `diagnose` message format~~ — settled
 
-**Deliberately unsettled, and owed a round of its own — deferred until the end of the 2.0 implementation.**
-
-The nested failure messages are the library's most-loved feature, so the format deserves a decision rather than an inherited default. v1's explicit style is the starting point:
+Chosen as this section asked: four complete families, each rendered over the same spread of cases, rather than cherry-picked examples. What shipped is three slots — what was expected, `at:` where, `in:` what — with the third dropped when the first has already named the type:
 
 ```
-For type list[int], invalid value at idx: 2
-  For type <class 'int'>, invalid value: 'hi'
+expected int, got str '1975'
+  at:  value.year
+  in:  Movie
 ```
 
-Alternatives should be judged as complete *families* — three or four of them, each covering a spread of cases in one sample (a plain mismatch, a failure at a collection index, a failure at a mapping key, a union with every member failing, a missing required `TypedDict` key, an unsupported type) — rather than as cherry-picked single examples, which flatter every format equally.
+Two rules find the place to report, and the naive walk gets both wrong: through a union, follow the member that got furthest; and report the type recorded at the deepest step rather than whatever the walk bottoms out in. See `diagnosis.py`.
 
-The cost of settling this is low and the cost of relitigating it is high, because §3.6 puts the format in exactly one place. Decide once, before implementing `diagnose`.
+Messages are also safe against the objects they describe. Every value and type in one is caller-supplied and may raise from its own `__repr__` or `__str__` — a class that reprs its attributes does exactly that from inside `__init__`, which is where a caller validating `self` meets it. Rendering such a failure used to re-raise, replacing the diagnosis with a traceback into the caller's own code, so `_display.py` guards every one of those calls and names what refused rather than propagating it.
 
 ### Staleness detection for the persistent cache
 
@@ -914,9 +913,11 @@ The cost of settling this is low and the cost of relitigating it is high, becaus
 
 There is no answer yet — only the requirement that a stale entry must be *detected*, never trusted, because a silently-wrong cached validator is the worst failure this library could have. §13's "types are immutable once used" is the same question in an easier setting, and the two probably want one idea.
 
-### The inlining budget
+### ~~The inlining budget~~ — settled
 
-§3.4 needs a policy — unroll small nodes, call into large or heavily-shared ones — and the thresholds are currently guesses. This resolves during stage 3 on §11's evidence rather than by argument now, but it is the place the compiled path is most likely to be wrong.
+Resolved during stage 3 on §11's evidence, as this section asked, and the evidence contradicted the premise. There is no cliff to tune around: cost is linear in emitted size and unrolling always repays, within about one value for `list[int]` and four hundred and sixty-five for a forty-field `TypedDict`. So the budget is a guard rail against a monstrous type stalling the compiler by surprise, not a tuning knob. §3.4 carries the two traps — it must count nodes *with multiplicity*, and nesting is a second dimension no node budget can see.
+
+A gate that would fall back to §3.3 when little was worth unrolling was built afterwards, measured and **rejected**: it saved only build time, which is one-time and cached, and the inlinable share does not predict whether compiling helps.
 
 ### ~~The `TypeStructure` API~~ — settled
 
@@ -936,4 +937,4 @@ Settled provisionally as `clear_cache()`, `forget_type(t)` and a `scoped_cache()
 ### Smaller, deferred by agreement
 
 - **Plugin-contributed manifest entries** (§7). Ours-alone is simpler; nothing forecloses opening it.
-- **The configuration surface** (§8). Settled for 2.0 by finding it empty: implementing discovered no options, so no manager ships. It arrives with its first real switch, which on current evidence is §3.4's inlining budget.
+- **The configuration surface** (§8). Settled for 2.0 by finding it empty: implementing discovered no options, so no manager ships. Still empty after stage 3, which shipped no switch of its own — §3.4's inlining budget was the candidate, and turned out to be a guard rail rather than something to tune.

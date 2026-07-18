@@ -61,6 +61,8 @@ Two consequences, both intended:
 
 Neither is a totality violation, because totality forbids *silently skipping an obligation* — and in both cases there was no obligation to skip. The type remains unsupported, and `can_validate` says so.
 
+Both turn on what counts as *reaching*, which is a question about where the unsupported component sits rather than about how far the value got. When a form is unsupported in itself, rather than by containing something that is, the walk reaches it the moment it arrives, and no test performed by that form's own arm comes first. `Type[T]` is the case in the catalogue where this bites; see its entry.
+
 **The conformance obligation between mechanisms is therefore over supported types**: for every `t` with `can_validate(t)`, all mechanisms agree on every value. Where `can_validate(t)` is false, `validate` may answer where the others raise, and a caller who needs the total answer asks for it by name.
 
 ### Purity
@@ -221,6 +223,8 @@ v1 got both forms wrong. Bare `typing.NamedTuple` was listed as a validatable ps
 Bare `type` and bare `typing.Type` check only that the value is a class.
 
 **Does not check:** subtype relationships for anything other than classes and unions of classes — `[by design]`. `Type[list[int]]` and similar are unsupported: `issubclass` cannot express them, and inventing a bespoke subtype relation is out of scope.
+
+`T` is judged before the value, so an unsupported `T` raises `UnsupportedTypeError` for *every* value, including one that is not a class at all. This is not an exception to the laziness rule below but an instance of it: the unsupported component here is this form itself, not something nested inside it, so the walk has reached it on arrival. There is no supported outer layer whose obligation the "is the value a class" test could be discharging. Judging the value first would make the verdict on a *type* depend on the value it was asked about, which is what it used to do.
 
 ### Protocols
 
