@@ -90,7 +90,7 @@ So: `validate` for one-off checks, `validator` when the type is fixed and the va
 
 **[`benchmark/REPORT.md`](benchmark/REPORT.md)** has the full table — every case, both outcomes, construction costs, and the break-even points that say exactly how many values each mechanism needs before it repays — with the machine it was measured on.
 Absolute figures move a long way with that machine; the ratios between the columns move far less, and are what these rows are for.
-It also measures the library against ten others, which **[`benchmark/PEER-COMPARISON.md`](benchmark/PEER-COMPARISON.md)** reads and draws conclusions from.
+It also measures the library against seven others, in ten configurations, which **[`benchmark/PEER-COMPARISON.md`](benchmark/PEER-COMPARISON.md)** reads and draws conclusions from.
 Run `python -m benchmark` for your own numbers, or `python -m benchmark --write` to regenerate the report.
 
 One difference, and it is deliberate. Both `validator` and `compiled_validator` analyse the whole type before seeing any value, so they **reject an unsupported type immediately**:

@@ -1,6 +1,6 @@
 # Peer comparison
 
-A comparative review of `typing-validation` v2.2.0 against ten runtime type-checking and validation libraries, over 55 cases on Python 3.14.0.
+A comparative review of `typing-validation` v2.2.0 against seven runtime type-checking and validation libraries, in the ten configurations they are worth measuring in, over 55 cases on Python 3.14.0.
 
 This document is written, not generated.
 It quotes as few figures as it can, and every one it quotes comes from [`REPORT.md`](REPORT.md), which is regenerated from the suite and is the authority.

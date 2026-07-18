@@ -83,7 +83,7 @@ alias or a NumPy array it stops unrolling and hands back a
 
 ``benchmark/REPORT.md`` in the repository has the full table — every case, every
 mechanism, both outcomes, and the break-even points — with the machine it was
-measured on, along with a comparison against ten other libraries.
+measured on, along with a comparison against seven other libraries.
 
 One difference is deliberate. Because they analyse the whole type before seeing
 any value, both **reject an unsupported type immediately**, where
