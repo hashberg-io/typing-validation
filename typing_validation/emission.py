@@ -37,12 +37,19 @@ _MAX_NESTING = 16
 """
 How deep the emitted code will nest before it calls instead.
 
-A second dimension the node budget cannot see, and a hard one: **CPython refuses
-more than 100 levels of indentation**, so a type a hundred containers deep — 101
-nodes, comfortably under the budget — unrolls into source that will not compile
-at all. The benchmark suite found that, by having such a case.
+A second dimension the node budget cannot see, and a hard one, because it guards
+two compile-time limits at once. Each container the emitter unrolls opens a
+``for`` loop, and **CPython refuses more than twenty statically nested blocks**,
+raising *"too many statically nested blocks"* the moment a twenty-first loop
+nests inside the twentieth. Each ``TypedDict`` field opens an ``if``, and CPython
+caps indentation at a hundred levels instead. The loop limit is the tighter of
+the two by far, and it is the one the benchmark suite hit, by having a
+hundred-deep chain of lists — which, left alone, unrolls into source that will
+not compile at all.
 
-Sixteen is far under the limit and far over anything real. Past it, the composed
+A nesting level is at least as deep as either, so bounding it bounds both, and
+the twenty-block limit is what the ceiling is really set against. Sixteen is
+under it with room to spare and far over anything real. Past it, the composed
 validator takes over, which costs nothing that matters: a type that deep spends
 its time descending rather than dispatching.
 """

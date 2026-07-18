@@ -166,6 +166,22 @@ class Case:
     says why.
     """
 
+    extension: str | None = None
+    """
+    The extension of this library's own that the case exercises, if any.
+
+    :obj:`None` for the type forms the whole field claims to support. Otherwise
+    the name of a mechanism no peer implements --- ``"numpy"`` for the plugin,
+    ``"__validate__"`` for the protocol that checks a generic's arguments.
+
+    This exists because a peer's verdict on such a case says nothing about the
+    peer. Scoring a library "wrong" for not implementing a protocol we invented,
+    and then reporting the total as a correctness percentage, measures whether it
+    is typing-validation. The capability is real and worth publishing; it is just
+    not the same claim, so the report counts the two separately and never adds
+    them up.
+    """
+
     v1_comparable: bool = True
     """
     Whether v1 supports this type, so the comparison means something.
@@ -292,6 +308,7 @@ def _numpy_cases() -> list[Case]:
             wrong,
             2,
             v1_comparable=False,
+            extension="numpy",
         ),
         Case(
             "NDArray[uint8] x10000",
@@ -300,6 +317,7 @@ def _numpy_cases() -> list[Case]:
             np.arange(10_000, dtype=np.float32),
             2,
             v1_comparable=False,
+            extension="numpy",
         ),
         Case(
             "ndarray[(int, int), uint8]",
@@ -308,6 +326,7 @@ def _numpy_cases() -> list[Case]:
             small,
             3,
             v1_comparable=False,
+            extension="numpy",
         ),
     ]
 

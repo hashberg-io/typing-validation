@@ -39,10 +39,14 @@ ROOT = pathlib.Path(__file__).parent.parent
 
 
 def _files() -> list[pathlib.Path]:
+    # Recursive, and that is load-bearing rather than tidy. A plain `glob` reads
+    # the top of each directory only, so moving a module into a sub-package
+    # would drop it out of every check here — silently, and looking like a
+    # tidy-up rather than a hole.
     return [
         path
         for name in SOURCE_DIRS
-        for path in sorted((ROOT / name).glob("*.py"))
+        for path in sorted((ROOT / name).rglob("*.py"))
     ]
 
 

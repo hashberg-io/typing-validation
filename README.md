@@ -55,8 +55,7 @@ The structured explanation is on the exception, for reading programmatically:
 
 ### Validating the same type repeatedly
 
-`validate` analyses the type on every call. When you validate many values against
-one type, `validator` analyses it once and hands back a function:
+`validate` analyses the type on every call. When you validate many values against one type, `validator` analyses it once and hands back a function:
 
 ```python
 >>> from typing_validation import validator
@@ -65,11 +64,9 @@ one type, `validator` analyses it once and hands back a function:
 True
 ```
 
-Same contract, same verdict, **2.7× faster per call**, and it repays the cost of
-building it within a handful of values.
+Same contract, same verdict, **2.7× faster per call**, and it repays the cost of building it within a handful of values.
 
-And when the values keep coming in very large numbers, `compiled_validator`
-emits Python specialised to the type and compiles it:
+And when the values keep coming in very large numbers, `compiled_validator` emits Python specialised to the type and compiles it:
 
 ```python
 >>> from typing_validation import compiled_validator
@@ -78,32 +75,24 @@ emits Python specialised to the type and compiles it:
 True
 ```
 
-That runs at **11.5 ns per type-node against a hand-written check's 11.1** — it
-is, within a few percent, the code you would have written yourself. It costs more
-to build, and it only helps where there is structure to unroll: for a recursive
-alias or a NumPy array it stops unrolling and hands back a `validator`, and the
-table says `never` rather than pretending otherwise.
+That runs at **11.5 ns per type-node against a hand-written check's 11.1** — it is, within a few percent, the code you would have written yourself.
+It costs more to build, and it only helps where there is structure to unroll: for a recursive alias or a NumPy array it stops unrolling and hands back a `validator`, and the table says `never` rather than pretending otherwise.
 
-So: `validate` for one-off checks, `validator` when the type is fixed and the
-values keep coming, `compiled_validator` when there are very many of them.
+So: `validate` for one-off checks, `validator` when the type is fixed and the values keep coming, `compiled_validator` when there are very many of them.
 
-| Type | `validate` | `validator` | `compiled_validator` | hand-written |
-|---|---|---|---|---|
-| `list[int]` (1000 items) | 58.1 µs | 21.4 µs | 13.5 µs | 12.4 µs |
-| `list[int]` (20 items) | 1.5 µs | 540 ns | 287 ns | 284 ns |
-| `dict[str, int]` (20 items) | 2.7 µs | 1.0 µs | 559 ns | 548 ns |
-| `tuple[int, str]` | 428 ns | 215 ns | 80 ns | 64 ns |
-| `int` | 49 ns | 46 ns | 46 ns | 27 ns |
+| Type                        | `validate` | `validator` | `compiled_validator` | hand-written |
+|:----------------------------|:-----------|:------------|:---------------------|:-------------|
+| `list[int]` (1000 items)    | 58.1 µs    | 21.4 µs     | 13.5 µs              | 12.4 µs      |
+| `list[int]` (20 items)      | 1.5 µs     | 540 ns      | 287 ns               | 284 ns       |
+| `dict[str, int]` (20 items) | 2.7 µs     | 1.0 µs      | 559 ns               | 548 ns       |
+| `tuple[int, str]`           | 428 ns     | 215 ns      | 80 ns                | 64 ns        |
+| `int`                       | 49 ns      | 46 ns       | 46 ns                | 27 ns        |
 
-**[`benchmark/RESULTS.md`](benchmark/RESULTS.md)** has the full table — every
-case, both outcomes, construction costs, and the break-even points that say
-exactly how many values each mechanism needs before it repays — with the machine
-it was measured on. Run `python -m benchmark` for your own numbers, or
-`python -m benchmark --write` to regenerate it.
+**[`benchmark/REPORT.md`](benchmark/REPORT.md)** has the full table — every case, both outcomes, construction costs, and the break-even points that say exactly how many values each mechanism needs before it repays — with the machine it was measured on.
+It also measures the library against ten others, which **[`benchmark/PEER-COMPARISON.md`](benchmark/PEER-COMPARISON.md)** reads and draws conclusions from.
+Run `python -m benchmark` for your own numbers, or `python -m benchmark --write` to regenerate the report.
 
-One difference, and it is deliberate. Both `validator` and `compiled_validator`
-analyse the whole type before seeing any value, so they **reject an unsupported
-type immediately**:
+One difference, and it is deliberate. Both `validator` and `compiled_validator` analyse the whole type before seeing any value, so they **reject an unsupported type immediately**:
 
 ```python
 validator(list[Callable[[int], int]])     # UnsupportedTypeError, at once
@@ -172,15 +161,14 @@ For classes you do not own, use `register_validator(cls, check)`.
 
 ## API
 
-The full API documentation is available at
-[typing-validation.readthedocs.io](https://typing-validation.readthedocs.io/).
+The full API documentation is available at [typing-validation.readthedocs.io](https://typing-validation.readthedocs.io/).
 
 ## Structure
 
 - `typing_validation/` — the package source.
 - `knowledge/` — design documents: the architecture, and the catalogue of supported type forms.
 - `test/` — the conformance suite, with the case corpus in `test/cases.py`.
-- `benchmark/` — the benchmark suite; run it with `python -m benchmark`.
+- `benchmark/` — the benchmark suite; run it with `python -m benchmark`. The machinery is in `benchmark/tools/`, the generated numbers in `benchmark/REPORT.md`, and the written synthesis in `benchmark/PEER-COMPARISON.md`.
 - `docs/` — the Sphinx documentation pipeline.
 
 ## License
