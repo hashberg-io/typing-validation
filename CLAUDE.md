@@ -35,7 +35,7 @@ Each release's design question was settled by **measuring before building**, and
 
 **2.2 — `compiled_validator`.** Unrolling is safe because **an acyclic type bounds the value's depth**: `list[int]` against a value nested twenty thousand deep fails its `isinstance` at level two and never descends. A cycle removes the bound, so a back-edge stops unrolling and calls the composed validator. Same for a plugin, which has no source to inline. Where there is nothing to unroll at all, `compiled_validator(t)` **returns `validator(t)`** — wrapping it measured slower than being it.
 
-**The inlining budget matters far less than §14 expects.** There is no cliff: cost is linear, and unrolling always repays (~1 value for `list[int]`, 465 for a forty-field `TypedDict`). It is a guard rail against a surprising stall, not a tuning knob. Two traps: it must count nodes **with multiplicity** (counting distinct nodes makes it do nothing, since interning means a tuple of twenty identical dictionaries has six), and **nesting is a second dimension** — CPython refuses more than 100 levels of indentation, which no node budget can see.
+**The inlining budget matters far less than §14 expects.** There is no cliff: cost is linear, and unrolling always repays (~1 value for `list[int]`, 465 for a forty-field `TypedDict`). It is a guard rail against a surprising stall, not a tuning knob. Two traps: it must count nodes **with multiplicity** (counting distinct nodes makes it do nothing, since interning means a tuple of twenty identical dictionaries has six), and **nesting is a second dimension** — CPython refuses more than ~20 statically nested blocks, which no node budget can see.
 
 ## Where to pick up
 

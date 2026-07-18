@@ -232,7 +232,7 @@ Three corrections, all from measuring.
 
 **It must count nodes with multiplicity.** Counting distinct nodes — the obvious reading of "unroll small nodes" — makes the budget do *nothing*: the graph is a DAG over distinct sub-types, so a tuple of twenty identical dictionaries has six of them and a hundred emitted ones. Every budget from 8 to 4096 produced byte-identical source until this was fixed. The quantity to bound is exactly the sharing that unrolling destroys.
 
-**Nesting is a second dimension, and a hard one.** CPython refuses more than **100 levels of indentation**. A type a hundred containers deep is 101 nodes, comfortably inside any sane node budget, and unrolls into source that will not compile. So there is a nesting limit as well, far below CPython's.
+**Nesting is a second dimension, and a hard one.** It guards two compile-time limits at once, and the tighter by far is that CPython refuses more than **~20 statically nested blocks** — each unrolled container opens a `for`, so a twenty-first nested inside the twentieth will not compile. Indentation is capped at 100 levels instead, which each `TypedDict` field's `if` consumes. A type a hundred containers deep is 101 nodes, comfortably inside any sane node budget, and unrolls into source that will not compile. So there is a nesting limit as well, far below both.
 
 #### When there is nothing to compile, this *is* §3.3
 
