@@ -37,6 +37,7 @@ from typing import (
     Tuple,
     Union,
 )
+from ._display import safe_repr, safe_str
 from .nodes import TypeForm, TypeNode, node_for
 from .plugins import registered_validator
 
@@ -194,7 +195,7 @@ class ValidationFailure:
 
     def __repr__(self) -> str:
         return (
-            f"<ValidationFailure {self.t!r}: {self.detail.value}, "
+            f"<ValidationFailure {safe_repr(self.t)}: {self.detail.value}, "
             f"{len(self.causes)} cause(s)>"
         )
 
@@ -258,8 +259,8 @@ def _show(t: Any, /) -> str:
         return t.__name__
     name = getattr(t, "__name__", None)
     if name is not None and type(t) in (TypeAliasType, NewType):
-        return str(name)
-    return str(t).replace("typing.", "")
+        return safe_str(name)
+    return safe_str(t).replace("typing.", "")
 
 
 def _plural(n: int, noun: str, /) -> str:
@@ -269,7 +270,7 @@ def _plural(n: int, noun: str, /) -> str:
 def _says(f: ValidationFailure, /) -> str:
     """What went wrong, in one line, at the place worth looking at."""
     if f.detail is Detail.MISSING_KEY:
-        return f"missing required key {f.location.at!r}"  # type: ignore[union-attr]
+        return f"missing required key {safe_repr(f.location.at)}"  # type: ignore[union-attr]
     if f.detail is Detail.NON_STRING_KEY:
         return f"keys must be strings, got {type(f.val).__name__}"
     if f.detail is Detail.WRONG_LENGTH:
@@ -278,12 +279,19 @@ def _says(f: ValidationFailure, /) -> str:
         # A literal's own type is the point, so naming the value's type as well
         # would be saying the same thing twice. This is the one detail that does
         # not end in a type-and-value pair, deliberately.
-        return f"expected {_show(f.t)}, got {f.val!r}"
+        return f"expected {_show(f.t)}, got {safe_repr(f.val)}"
     if f.detail is Detail.NOT_A_CLASS:
-        return f"expected a class, got {type(f.val).__name__} {f.val!r}"
+        return (
+            f"expected a class, got {type(f.val).__name__} {safe_repr(f.val)}"
+        )
     if f.detail is Detail.NOT_A_NAMED_TUPLE:
-        return f"expected a named tuple, got {type(f.val).__name__} {f.val!r}"
-    return f"expected {_show(f.t)}, got {type(f.val).__name__} {f.val!r}"
+        return (
+            f"expected a named tuple, got {type(f.val).__name__} "
+            f"{safe_repr(f.val)}"
+        )
+    return (
+        f"expected {_show(f.t)}, got {type(f.val).__name__} {safe_repr(f.val)}"
+    )
 
 
 def _step(f: ValidationFailure, /) -> str:
@@ -299,9 +307,9 @@ def _step(f: ValidationFailure, /) -> str:
         # the reader can go to.
         return f"{{{at}}}"
     if place is Place.KEY:
-        return f".keys(){{{at!r}}}"
+        return f".keys(){{{safe_repr(at)}}}"
     if place is Place.VALUE_AT:
-        return f"[{at!r}]"
+        return f"[{safe_repr(at)}]"
     if place is Place.FIELD:
         return f".{at}"
     return ""
@@ -367,9 +375,9 @@ def diagnose(val: Any, t: Any, /) -> ValidationFailure:
     failure = _diagnose(val, t)
     if failure is None:
         raise DiagnosisFailure(
-            f"Validation of {val!r} against {t!r} failed, but diagnosis could "
-            f"not reproduce the failure. This is a bug in typing-validation; "
-            f"please report it."
+            f"Validation of {safe_repr(val)} against {safe_repr(t)} failed, but "
+            f"diagnosis could not reproduce the failure. This is a bug in "
+            f"typing-validation; please report it."
         )
     return failure
 
