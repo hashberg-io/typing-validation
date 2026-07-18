@@ -1,6 +1,6 @@
 # Peer comparison
 
-A comparative review of `typing-validation` v2.2.0 against ten runtime type-checking and validation libraries, over 55 cases on Python 3.14.4.
+A comparative review of `typing-validation` v2.2.0 against ten runtime type-checking and validation libraries, over 55 cases on Python 3.14.0.
 
 This document is written, not generated.
 It quotes as few figures as it can, and every one it quotes comes from [`REPORT.md`](REPORT.md), which is regenerated from the suite and is the authority.
@@ -144,7 +144,7 @@ The shape of it:
 | msgspec (strict)        | rebuilding | 5W–25L | 0.32×   | 22.6×      |
 
 **Not unbeaten.**
-trycast is **1.28× faster on `list[int] x1000`** — 89.6 µs against 115.1 µs — and that is not noise, it is the shape of the corpus: a thousand-element list is where per-element overhead is the entire cost, and our per-node dispatch costs more than trycast's.
+trycast is **1.27× faster on `list[int] x1000`** — 89.7 µs against 114.2 µs — and that is not noise, it is the shape of the corpus: a thousand-element list is where per-element overhead is the entire cost, and our per-node dispatch costs more than trycast's.
 The other loss, on `list[int] | list[str]`, is 0.98× and *is* noise.
 One reproducible loss to an exact-tier peer is worth more to a reader than a round number, and it is the first thing anyone re-running this will find.
 
@@ -259,7 +259,7 @@ A corpus with only one would have measured the wrong thing.
 Three are worth reporting upstream.
 
 **msgspec breaks on recursive aliases.**
-It wins most of the flat corpus outright, then takes **3.5 ms** on a 121-node `Tree` — 20.8× slower than `validate` here — *and* **rejects the valid tree outright**.
+It wins most of the flat corpus outright, then takes **3.61 ms** on a 121-node `Tree` — 21.2× slower than `validate` here — *and* **rejects the valid tree outright**.
 Milliseconds on a tree that small is not a slow path, it is a different algorithm, and the wrong verdict is the more serious half of it.
 The flat corpus would never have found this.
 The ratio is quoted with the machine it came from because it moves a great deal with the hardware; the effect does not.
@@ -322,8 +322,10 @@ That is the one shape where something in the design is costing more than it need
 Neither build is flat, `validator`'s spans 105× across the corpus, and `compiled_validator`'s is a median of 6.8× more rather than the order of magnitude the per-call figures suggest.
 Where the headroom is, per case, is a question `REPORT.md`'s break-even table answers directly and this document should not guess at.
 
-**Two open questions this review raises but does not answer.**
-Whether `compiled_validator` should fall back to `validator` automatically when the inlining budget finds nothing to unroll — 35 of the 55 cases buy nothing from compiling, and pay a median of 6.8× the analysis they needed anyway to find that out — and whether the `__validate__` protocol should be documented as the ecosystem's answer to generic arguments rather than as a local feature.
+**Two questions this review raised, both since answered.**
+Whether `compiled_validator` should fall back to `validator` when little is worth unrolling — 35 of the 55 cases buy nothing from compiling, and pay a median of 6.8× the analysis they needed anyway to find that out — was built as an opt-in gate, measured, and **rejected**.
+It only ever saved build time, which is one-time and cached, and the score it gated on does not predict whether compiling helps: the gain is the per-level structure *dispatch* that unrolling removes, and that stays large exactly where a plugin or a deep call makes the inlinable share read low.
+Whether the `__validate__` protocol should be documented as the ecosystem's answer to generic arguments rather than as a local feature is taken up in [`../knowledge/GENERIC-ARGUMENTS.md`](../knowledge/GENERIC-ARGUMENTS.md), which finds the ground already assigned rather than neglected — and the bare dunder name the weakest part of the proposal.
 
 ---
 
@@ -338,5 +340,5 @@ Cases: `benchmark/tools/cases.py` (flat), `benchmark/tools/extended.py` (extende
 Contenders and the tier audit: `benchmark/tools/contenders.py`.
 Measurement, with support and verdict settled before the clock starts: `benchmark/tools/compare.py`.
 
-Measured on Python 3.14.4 against typing-validation 2.2.0, with beartype 0.22.9, cattrs 26.1.0, msgspec 0.21.1, numpy 2.5.1, pydantic 2.13.4, trycast 1.3.0, typedload 2.41, typeguard 4.5.2.
+Measured on Python 3.14.0 against typing-validation 2.2.0, with beartype 0.22.9, cattrs 26.1.0, msgspec 0.21.1, numpy 2.5.1, pydantic 2.13.4, trycast 1.3.0, typedload 2.41, typeguard 4.5.2.
 Full environment in `REPORT.md`.

@@ -58,10 +58,11 @@ function:
 
 Same contract, same verdict, and about 2.7x faster per call. It repays the cost
 of building it almost at once — the benchmark suite reports exactly when, per
-type: nought to four values for a container, twenty-two for a fixed tuple, a few
-hundred for a scalar. So :func:`~typing_validation.validation.validate` for a
-one-off check, and :func:`~typing_validation.composition.validator` when the type
-is fixed and the values keep coming.
+type: nought to four values for a container, twenty-one for a fixed tuple, the
+better part of a thousand for a scalar. So
+:func:`~typing_validation.validation.validate` for a one-off check, and
+:func:`~typing_validation.composition.validator` when the type is fixed and the
+values keep coming.
 
 And when the values keep coming in very large numbers,
 :func:`~typing_validation.emission.compiled_validator` emits Python specialised
@@ -74,8 +75,8 @@ to the type and compiles it:
     >>> check([1, 2, 3])
     True
 
-That runs at 11.5 nanoseconds per type-node against a hand-written check's 11.1 —
-within a few percent, the code you would have written yourself. It costs more to
+That runs at 23 nanoseconds per type-node against a hand-written check's 23 — to
+within the noise, the code you would have written yourself. It costs more to
 build, and it helps only where there is structure to unroll: for a recursive
 alias or a NumPy array it stops unrolling and hands back a
 :func:`~typing_validation.composition.validator`.

@@ -75,20 +75,21 @@ And when the values keep coming in very large numbers, `compiled_validator` emit
 True
 ```
 
-That runs at **11.5 ns per type-node against a hand-written check's 11.1** — it is, within a few percent, the code you would have written yourself.
+That runs at **23 ns per type-node against a hand-written check's 23** — it is, to within the noise, the code you would have written yourself.
 It costs more to build, and it only helps where there is structure to unroll: for a recursive alias or a NumPy array it stops unrolling and hands back a `validator`, and the table says `never` rather than pretending otherwise.
 
 So: `validate` for one-off checks, `validator` when the type is fixed and the values keep coming, `compiled_validator` when there are very many of them.
 
 | Type                        | `validate` | `validator` | `compiled_validator` | hand-written |
 |:----------------------------|:-----------|:------------|:---------------------|:-------------|
-| `list[int]` (1000 items)    | 58.1 µs    | 21.4 µs     | 13.5 µs              | 12.4 µs      |
-| `list[int]` (20 items)      | 1.5 µs     | 540 ns      | 287 ns               | 284 ns       |
-| `dict[str, int]` (20 items) | 2.7 µs     | 1.0 µs      | 559 ns               | 548 ns       |
-| `tuple[int, str]`           | 428 ns     | 215 ns      | 80 ns                | 64 ns        |
-| `int`                       | 49 ns      | 46 ns       | 46 ns                | 27 ns        |
+| `list[int]` (1000 items)    | 115.6 µs   | 42.9 µs     | 22.5 µs              | 23.1 µs      |
+| `list[int]` (20 items)      | 2.7 µs     | 1.0 µs      | 561 ns               | 541 ns       |
+| `dict[str, int]` (20 items) | 5.2 µs     | 1.9 µs      | 1.0 µs               | 1.0 µs       |
+| `tuple[int, str]`           | 724 ns     | 362 ns      | 150 ns               | 127 ns       |
+| `int`                       | 95 ns      | 92 ns       | 89 ns                | 56 ns        |
 
 **[`benchmark/REPORT.md`](benchmark/REPORT.md)** has the full table — every case, both outcomes, construction costs, and the break-even points that say exactly how many values each mechanism needs before it repays — with the machine it was measured on.
+Absolute figures move a long way with that machine; the ratios between the columns move far less, and are what these rows are for.
 It also measures the library against ten others, which **[`benchmark/PEER-COMPARISON.md`](benchmark/PEER-COMPARISON.md)** reads and draws conclusions from.
 Run `python -m benchmark` for your own numbers, or `python -m benchmark --write` to regenerate the report.
 
