@@ -47,7 +47,6 @@ import marshal
 import pathlib
 import subprocess
 import sys
-import time
 import types
 from typing import Any, Callable
 
@@ -386,23 +385,34 @@ def _import_ns() -> float:
     A saving is only large or small next to something. Startup latency is what
     marshalling buys, so the honest comparison is against the other startup cost
     the same caller already pays without complaining.
+
+    Read from ``-X importtime``, which reports it directly, rather than timing
+    two subprocesses and subtracting. Process spawn is noisier than the import
+    being measured, so their difference is mostly spawn noise — and taking the
+    smallest of several such differences selects the worst outlier rather than
+    the best estimate. The first draft did that and printed a negative time.
     """
-    times = []
+    seen: list[float] = []
     for _ in range(5):
-        start = time.perf_counter()
-        subprocess.run(
-            [sys.executable, "-c", "import typing_validation"],
+        out = subprocess.run(
+            [
+                sys.executable,
+                "-X",
+                "importtime",
+                "-c",
+                "import typing_validation",
+            ],
             capture_output=True,
+            text=True,
+            encoding="utf-8",
             check=True,
         )
-        base = time.perf_counter() - start
-        start = time.perf_counter()
-        subprocess.run(
-            [sys.executable, "-c", ""], capture_output=True, check=True
-        )
-        empty = time.perf_counter() - start
-        times.append(base - empty)
-    return min(times) * 1e9
+        seen += [
+            float(line.split("|")[1].strip()) * 1000
+            for line in out.stderr.splitlines()
+            if line.rstrip().endswith(" typing_validation")
+        ]
+    return min(seen) if seen else 0.0
 
 
 def render(probes: list[Probe], /) -> str:
