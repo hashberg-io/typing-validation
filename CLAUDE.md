@@ -29,6 +29,16 @@ Each stage manufactures the oracle for the next, so the order is not negotiable:
 
 Every breaking change lands in 2.0. Stages 2 and 3 are purely additive.
 
+### Buildable now
+
+With marshalling declined and the subtype relation waiting on an interpreter that does not exist yet, **the roadmap has no unblocked release on it.** These are the things that can be done anyway. Each is small, none is a milestone, and each is argued somewhere else in this file rather than here — this list is only a way in.
+
+- **Namespace `__validate__`.** The strongest objection to the extension point is its name, and it does not depend on ever proposing anything upstream. It is the only bare dunder in the field: every peer either namespaces or uses no dunder at all. Breaking, so it wants a deprecation window and therefore wants starting early. See *Raised by the peer comparison* and [knowledge/GENERIC-ARGUMENTS.md](knowledge/GENERIC-ARGUMENTS.md).
+- **Report the three findings owed upstream** — msgspec's recursive `Tree`, typedload's `AssertionError` from its own error path, beartype's `TypeHint` rejecting forms `is_bearable` accepts. Verified against installed sources, written up, and still unsent. Not code at all, which is why it keeps not happening. See *Raised by the peer comparison*.
+- **Settle `Case.needs`.** Declared with a docstring arguing that a benchmark which silently skips is worse than one that says why, then never set and never read, while `_numpy_cases()` silently returns `[]`. Implement it or delete it; leaving it is a guarantee that does not exist. See *About the suite itself*.
+- **Lower the benchmark's default `--repeats`.** 2000 now costs over ten minutes, which is why the full report is a pre-release ritual rather than something anyone runs. See *About the suite itself*.
+- **Decide whether there is a `CHANGELOG`.** There is none, so three releases' user-visible history lives only in GitHub release notes, which are not in the repository and not diffable. Nothing depends on this and it has never been decided either way.
+
 ### What the three mechanisms turned out to be
 
 Each release's design question was settled by **measuring before building**, and in both cases the measurement contradicted the design. Worth knowing before touching any of them.
