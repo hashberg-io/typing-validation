@@ -826,17 +826,19 @@ Both `validate` and `validator` are oracles. Two independent implementations alr
 
 This is where the design is most likely to be wrong, because the inlining budget is a real compiler decision made on guesses. §11's hand-written baseline and break-even numbers are what turn those guesses into evidence.
 
-### Stage 4 — marshalling
+### Stage 4 — marshalling — measured and declined
 
-A persistent cache for stage 3's output, so that compile latency is paid once across processes rather than once per process.
+A persistent cache for stage 3's output, so that compile latency is paid once across processes rather than once per process. **It was measured before it was built, and the measurement retired it.** §14 has the numbers and the reasoning; the rest of this section is kept because it records what was learned about the mechanism, which stays true and would be the starting point if the question is ever reopened.
 
 The **mechanism** is settled. `marshal` handles code objects, but `co_consts` admits only `None`, `bool`, `int`, `float`, `complex`, `str`, `bytes`, `tuple`, `frozenset`, `code` and `Ellipsis`. A type — `int`, a user class, an enum member inside a `Literal` — can never be a constant; in generated source it compiles to a `LOAD_GLOBAL` resolved against the globals handed to `exec`. So the persisted artifact is two parts: **the marshalled code, plus a recipe for rebuilding its environment** — a mapping from generated names to either inline marshalable constants or resolvable references like `module:qualname`.
 
 This section was written expecting §3.4 to emit a *set* of mutually-referencing functions, one per recursion root, each separately a code object, so that the recipe could map names to them with cycles included. **It emits one function.** Marshalling must not assume otherwise: there is a single code object to persist, and the back-edges a cycle needs are closed inside it rather than across a set of names. See §3.4.
 
-The **hard part is unsolved, and it is why this is last.** Staleness. What invalidates a cached validator for `list[MyClass]`? The class's identity does not survive across processes. Its `__mro__` may have changed since the bytecode was written. After a refactor, a *different* class can hold the same qualified name — and then the cached validator is silently wrong, which is the worst failure mode this library has. `__pycache__` solves the analogous problem with source path, mtime and size; our inputs are not files, so that answer does not transfer. There is no design here yet, only a requirement: **a stale entry must be detected, never trusted.**
+The **hard part was thought to be staleness**, and it is why this was scheduled last. What invalidates a cached validator for `list[MyClass]`? After a refactor, a *different* class can hold the same qualified name, and then the cached validator is silently wrong, which is the worst failure mode this library has. `__pycache__` solves the analogous problem with source path, mtime and size; our inputs are not files, so that answer does not transfer. The requirement was that **a stale entry must be detected, never trusted**.
 
-Deferring is not procrastination. Stage 3 is the oracle: a marshalled validator must behave identically to a freshly-compiled one, and that test cannot be written until freshly-compiled ones are known to be right.
+Two of the three worries above turned out to be soft. A class's identity not surviving a process is what the recipe already handles. And `__mro__` changing does *not* invalidate anything, because every class check emits a live `isinstance`: a re-based class changes a cached validator's answer exactly as it changes a freshly-compiled one's, which is the type meaning something new rather than the cache going stale. What remains real is the same-name-different-class case, and §14 records the exact verification that would have caught it — and why it was never worth writing.
+
+Deferring was not procrastination. Stage 3 is the oracle: a marshalled validator must behave identically to a freshly-compiled one, and that test could not be written until freshly-compiled ones were known to be right. Deferring is also what made the measurement possible, and the measurement is what settled it.
 
 ### Release boundaries
 
@@ -847,7 +849,7 @@ The stages *are* the releases:
 | **2.0** | Stage 1 — `validate` and everything around it |
 | **2.1** | Stage 2 — `validator` |
 | **2.2** | Stage 3 — `compiled_validator` |
-| later | Stage 4 — marshalling |
+| — | Stage 4 — marshalling, measured and declined (§14) |
 
 **Every breaking change lands in 2.0**: the API removals of §9, the corrections in [TYPES.md](TYPES.md), the 3.14 floor. Stages 2 and 3 are purely additive and fit under semantic versioning without a further major bump, so users absorb the breaks once, early, rather than waiting behind work whose schedule is unknown. The unsolved staleness problem then blocks no release at all.
 
@@ -907,11 +909,21 @@ Two rules find the place to report, and the naive walk gets both wrong: through 
 
 Messages are also safe against the objects they describe. Every value and type in one is caller-supplied and may raise from its own `__repr__` or `__str__` — a class that reprs its attributes does exactly that from inside `__init__`, which is where a caller validating `self` meets it. Rendering such a failure used to re-raise, replacing the diagnosis with a traceback into the caller's own code, so `_display.py` guards every one of those calls and names what refused rather than propagating it.
 
-### Staleness detection for the persistent cache
+### ~~Staleness detection for the persistent cache~~ — declined, on measurement
 
-**The hardest problem left in the design, and the reason §12 puts marshalling last.**
+Recorded as the hardest problem left in the design, and never solved, because measuring what solving it would buy showed it was not worth solving. `benchmark/marshalling.py` splits construction into its phases and times each; `benchmark/MARSHALLING.md` is what it produced.
 
-There is no answer yet — only the requirement that a stale entry must be *detected*, never trusted, because a silently-wrong cached validator is the worst failure this library could have. §13's "types are immutable once used" is the same question in an easier setting, and the two probably want one idea.
+**A cache would work.** `compile()` is 60–75% of a cold build, and a marshalled load skips 77–97% of one. The staleness surface is also narrower than this section assumed: the emitted code depends only on what the emitter read — form, `__annotations__`, `__required_keys__`, `_fields`, alias expansions, `Literal` values — and *not* on `__mro__`, because every class check is a live `isinstance` that a re-based class changes identically for cached and fresh code. Verification could therefore be a digest over the rebuilt node graph, which is exact rather than heuristic.
+
+**It is not worth having.** The load path lands within ~300 µs of `validator(t)` across the whole corpus — 448 µs against 758 µs — because rebuilding the node graph and resolving the globals is most of what composing a validator does anyway. So a cache cannot claim cheaper startup, which `validator` already gives for nothing. Its only coherent claim is *the compiled path's run speed at the composed path's startup*, and the whole of that, across all sixteen compilable types in the corpus, is 6–8 ms — against the 22–25 ms the same process spends importing this library. §12's rule decides it: a release that cannot demonstrate it earns its complexity does not ship, and this one would buy milliseconds with the worst failure mode the library has.
+
+Three things found while measuring, which any revival has to answer first:
+
+- **Not every type can be persisted at all.** A recipe entry has to resolve back to the object it names, and `type(None)` reports its module as `builtins`, where `NoneType` does not exist. Such types must be refused rather than cached against a reference that cannot be followed.
+- **Emitted globals can hold composed closures**, which nothing can marshal. A nested plugin puts one there, so a load needs the node graph whether or not it verifies anything.
+- **Deciding whether to compile is itself a phase**, and a tenth to a fifth of the build: `_is_pure_call_out` emits the whole body a second time to compare it against a call-out.
+
+§13's "types are immutable once used" is the same question in an easier setting and remains unanswered. It no longer has a second customer.
 
 ### ~~The inlining budget~~ — settled
 

@@ -169,7 +169,7 @@ The full API documentation is available at [typing-validation.readthedocs.io](ht
 - `typing_validation/` — the package source.
 - `knowledge/` — design documents: the architecture, and the catalogue of supported type forms.
 - `test/` — the conformance suite, with the case corpus in `test/cases.py`.
-- `benchmark/` — the benchmark suite; run it with `python -m benchmark`. The machinery is in `benchmark/tools/`, the generated numbers in `benchmark/REPORT.md`, and the written synthesis in `benchmark/PEER-COMPARISON.md`.
+- `benchmark/` — the benchmark suite; run it with `python -m benchmark`. The machinery is in `benchmark/tools/`, the generated numbers in `benchmark/REPORT.md`, and the written synthesis in `benchmark/PEER-COMPARISON.md`. `benchmark/marshalling.py` is a separate probe, run with `python -m benchmark.marshalling`, which asked whether a persistent cache for compiled validators would be worth building; `benchmark/MARSHALLING.md` is its answer.
 - `docs/` — the Sphinx documentation pipeline.
 
 ## License
