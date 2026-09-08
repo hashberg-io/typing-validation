@@ -584,7 +584,7 @@ def _type_of_target(
     (arg,) = args
     if arg is Any:
         return None
-    if type(arg) is type:
+    if isinstance(arg, type):
         return arg
     if type(arg) is Union:  # type: ignore[comparison-overlap]
         members = arg.__args__
