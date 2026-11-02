@@ -35,7 +35,6 @@ from types import GenericAlias
 from typing import (
     Annotated,
     Any,
-    ByteString,
     final,
     get_args,
     get_origin,
@@ -54,6 +53,7 @@ from typing import (
 from annotationlib import ForwardRef
 
 from . import _cache as cache
+from ._compat import is_bytestring_origin
 from ._display import safe_repr
 from .plugins import (
     plugin_import,
@@ -158,7 +158,6 @@ _COLLECTION_ORIGINS = frozenset(
 _MAPPING_ORIGINS = frozenset({dict, defaultdict, Mapping, MutableMapping})
 _ITERATOR_ORIGINS = frozenset({Iterator})
 _MAYBE_ITEM_ORIGINS = frozenset({Iterable, Container})
-_BYTESTRING_ORIGIN = get_origin(ByteString)
 
 
 @final
@@ -499,7 +498,9 @@ def _classify(t: Any, /) -> Classified:
         return _plain(TypeForm.ITERATOR)
     if origin in _MAYBE_ITEM_ORIGINS:
         return TypeForm.MAYBE_ITEMS, args[:1], None, None
-    if origin is _BYTESTRING_ORIGIN:
+    # Keep the deprecated ByteString form visible as an ordinary class node;
+    # its values are checked with Buffer semantics by the validator.
+    if is_bytestring_origin(origin):
         return _plain(TypeForm.CLASS)
     if origin is Callable:
         return _unsupported(_CALLABLE_REASON)
