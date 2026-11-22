@@ -4,7 +4,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/typing-validation.svg)](https://pypi.python.org/pypi/typing-validation/)
 [![PyPI status](https://img.shields.io/pypi/status/typing-validation.svg)](https://pypi.python.org/pypi/typing-validation/)
 [![Checked with Mypy](http://www.mypy-lang.org/static/mypy_badge.svg)](https://github.com/python/mypy)
-[![Documentation Status](https://readthedocs.org/projects/typing-validation/badge/?version=latest)](https://typing-validation.readthedocs.io/en/latest/?badge=latest)
+[![Documentation Status](https://img.shields.io/readthedocs/typing-validation/latest)](https://typing-validation.readthedocs.io/en/latest/)
 
 A library to perform runtime validation of Python objects using type hints.
 
