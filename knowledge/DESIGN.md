@@ -901,7 +901,7 @@ Chosen as this section asked: four complete families, each rendered over the sam
 
 ```
 expected int, got str '1975'
-  at:  value.year
+  at:  value['year']
   in:  Movie
 ```
 

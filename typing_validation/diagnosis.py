@@ -295,7 +295,7 @@ def _says(f: ValidationFailure, /) -> str:
     )
 
 
-def _step(f: ValidationFailure, /) -> str:
+def _step(f: ValidationFailure, container: Any, /) -> str:
     """How to reach this failure from the value that contains it, in code."""
     if f.location is None:
         return ""
@@ -312,6 +312,10 @@ def _step(f: ValidationFailure, /) -> str:
     if place is Place.VALUE_AT:
         return f"[{safe_repr(at)}]"
     if place is Place.FIELD:
+        # A TypedDict's fields are keys of a mapping; a named tuple's are
+        # attributes. Both are fields, but they are not reached the same way.
+        if isinstance(container, Mapping):
+            return f"[{safe_repr(at)}]"
         return f".{at}"
     return ""
 
@@ -338,7 +342,7 @@ def _locate(root: ValidationFailure, /) -> tuple[str, ValidationFailure]:
     while True:
         if f.detail is Detail.IN_COMPONENT and f.causes:
             child = f.causes[0]
-            step = _step(child)
+            step = _step(child, f.val)
             f = child
             if step:
                 path += step

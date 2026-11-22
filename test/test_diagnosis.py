@@ -135,6 +135,12 @@ class TestWhereTheFailureWas:
             assert "missing required key 'year'" in message, message
             assert f"at:  {at}" in message, message
 
+    def test_fields_are_reached_as_keys_or_attributes(self) -> None:
+        message = str(_fails([{"title": "Jaws", "year": "x"}], list[Movie]))
+        assert "at:  value[0]['year']" in message, message
+        message = str(_fails([Point("a", 2)], list[Point]))  # type: ignore[arg-type]
+        assert "at:  value[0].x" in message, message
+
     def test_a_bad_typed_dict_field(self) -> None:
         failure = _fails({"title": "Jaws", "year": "x"}, Movie).failure
         assert failure is not None
