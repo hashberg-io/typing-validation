@@ -9,6 +9,7 @@ import json
 import os
 import pkgutil
 import sys
+import types
 from dataclasses import dataclass, field
 from types import ModuleType
 from typing import Any, Callable, TypeAliasType
@@ -26,78 +27,21 @@ def _list_package_contents(pkg_name: str) -> list[str]:
     return modules
 
 
-SPECIAL_CLASS_MEMBERS_REL = (
-    "__eq__",
-    "__gt__",
-    "__ge__",
-    "__lt__",
-    "__le__",
-    "__ne__",
-)
-SPECIAL_CLASS_MEMBERS_UNOP = (
-    "__abs__",
-    "__not__",
-    "__inv__",
-    "__invert__",
-    "__neg__",
-    "__pos__",
-)
-SPECIAL_CLASS_MEMBERS_BINOP = (
-    "__add__",
-    "__and__",
-    "__concat__",
-    "__floordiv__",
-    "__lshift__",
-    "__mod__",
-    "__mul__",
-    "__matmul__",
-    "__or__",
-    "__pow__",
-    "__rshift__",
-    "__sub__",
-    "__truediv__",
-    "__xor__",
-)
-SPECIAL_CLASS_MEMBERS_BINOP_I = tuple(
-    f"__i{name[2:]}" for name in SPECIAL_CLASS_MEMBERS_BINOP
-)
-SPECIAL_CLASS_MEMBERS_BINOP_R = tuple(
-    f"__r{name[2:]}" for name in SPECIAL_CLASS_MEMBERS_BINOP
-)
-SPECIAL_CLASS_MEMBERS_CAST = (
-    "__bool__",
-    "__int__",
-    "__float__",
-    "__complex__",
-    "__bytes__",
-    "__str__",
-)
-SPECIAL_CLASS_MEMBERS_OTHER = (
-    "__init__",
-    "__new__",
-    "__call__",
-    "__repr__",
-    "__index__",
-    "__contains__",
-    "__delitem__",
-    "__getitem__",
-    "__setitem__",
-    "__getattr__",
-    "__setattr__",
-    "__delattr__",
-    "__set_name__",
-    "__set__",
-    "__get__",
-)
-SPECIAL_CLASS_MEMBERS = (
-    SPECIAL_CLASS_MEMBERS_REL
-    + SPECIAL_CLASS_MEMBERS_UNOP
-    + SPECIAL_CLASS_MEMBERS_BINOP
-    + SPECIAL_CLASS_MEMBERS_BINOP_I
-    + SPECIAL_CLASS_MEMBERS_BINOP_R
-    + SPECIAL_CLASS_MEMBERS_CAST
-    + SPECIAL_CLASS_MEMBERS_OTHER
-)
+def _public_special_members(cls: type) -> list[str]:
+    """
+    The special ("dunder") members of a class which opt into the API docs by
+    carrying a ``:meta public:`` field in their docstring.
+    """
+    special_members: list[str] = []
+    for name in dir(cls):
+        if not (name.startswith("__") and name.endswith("__")):
+            continue
+        if not hasattr(cls, name):
+            continue
+        doc = getattr(getattr(cls, name), "__doc__", None)
+        if doc is not None and ":meta public:" in doc:
+            special_members.append(name)
+    return special_members
 
 
 STRUCTURE_HELP = """Expected a 'make-api.json' file, with the following structure:
@@ -257,6 +201,12 @@ class MakeApiConfig:
             return cls.from_dict(json.load(f))
 
 
+def _is_lazy_import(obj: Any) -> bool:
+    """Checks whether the given object is a pending lazy import."""
+    lazy_import_type = getattr(types, "LazyImportType", None)
+    return lazy_import_type is not None and isinstance(obj, lazy_import_type)
+
+
 def _collect_type_aliases(
     manual: dict[str, list[str]], modules_dict: dict[str, ModuleType]
 ) -> dict[str, list[str]]:
@@ -382,10 +332,15 @@ def make_apidocs() -> None:
             )
             if to_exclude:
                 continue
-            member = getattr(mod, member_name)
             if member_name.startswith("_") and not to_include:
                 continue
-            member = getattr(mod, member_name)
+            try:
+                member = getattr(mod, member_name)
+            except ImportError as e:
+                if not _is_lazy_import(vars(mod).get(member_name)):
+                    raise
+                print(f"    skipped {member_name} (unresolved lazy import: {e})")
+                continue
             member_module = inspect.getmodule(member)
             member_module_name = (
                 member_module.__name__ if member_module is not None else None
@@ -408,7 +363,9 @@ def make_apidocs() -> None:
             else:
                 member_fullname = f"{mod_name}.{member_name}"
             member_kind = "data"
-            if inspect.isclass(member):
+            if isinstance(member, TypeAliasType):
+                member_kind = "type"
+            elif inspect.isclass(member):
                 member_kind = "class"
             elif inspect.isfunction(member):
                 member_kind = "function"
@@ -432,27 +389,12 @@ def make_apidocs() -> None:
                 if member_kind == "class":
                     member_lines.append("    :show-inheritance:")
                     member_lines.append("    :members:")
-                    _special_class_submembers: list[str] = []
-                    if (
-                        member_fullname in special_class_members
-                        and special_class_members[member_fullname]
-                    ):
-                        _special_class_submembers.extend(
-                            special_class_members[member_fullname]
+                    _special_class_submembers = list(
+                        dict.fromkeys(
+                            special_class_members.get(member_fullname, [])
+                            + _public_special_members(member)
                         )
-                    for submember_name in SPECIAL_CLASS_MEMBERS:
-                        if not hasattr(member, submember_name):
-                            continue
-                        submember = getattr(member, submember_name)
-                        if (
-                            not hasattr(submember, "__doc__")
-                            or submember.__doc__ is None
-                        ):
-                            continue
-                        if not ":meta public:" in submember.__doc__:
-                            continue
-                        if submember_name not in _special_class_submembers:
-                            _special_class_submembers.append(submember_name)
+                    )
                     if _special_class_submembers:
                         member_lines.append(
                             f"    :special-members: {', '.join(_special_class_submembers)}"
@@ -484,6 +426,7 @@ def make_apidocs() -> None:
                 "function": "func",
                 "class": "class",
                 "module": "mod",
+                "type": "type",
             }
             for member_fullname, member_kind in reexported_members:
                 refkind = f":py:{refkinds[member_kind]}:"

@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import annotationlib
+import builtins
 from collections import deque
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
@@ -23,6 +24,7 @@ import functools
 import inspect
 import re
 import traceback
+import types
 from types import FunctionType, ModuleType
 from typing import Any
 from sphinx.application import Sphinx
@@ -37,6 +39,19 @@ logger = logging.getLogger(__name__)
 
 PROPERTY_DESCRIPTORS: set[str] = set()
 CACHED_PROPERTY_DESCRIPTORS: set[str] = set()
+
+_LazyImportType: type | None = getattr(types, "LazyImportType", None)
+
+
+def _resolve_lazy(obj: Any) -> Any:
+    """Resolves a pending lazy import, returning any other object unchanged."""
+    if _LazyImportType is None or not isinstance(obj, _LazyImportType):
+        return obj
+    try:
+        return obj.resolve()
+    except Exception as e:
+        logger.debug(f"Could not resolve lazy import {obj!r}, {type(e)}: {e}")
+        return obj
 
 
 ### 1. Parse Type Annotations ###
@@ -67,14 +82,32 @@ class ParsedType:
         if isinstance(args, str) and not args:
             raise ValueError("Literal type must include at least one value.")
 
-    def crossref(self, globalns: Mapping[str, Any] | None = None) -> str:
+    def crossref(
+        self,
+        globalns: Mapping[str, Any] | None = None,
+        type_params: frozenset[str] = frozenset(),
+    ) -> str:
         """Generates Sphinx cross-reference link for the given type, using local names."""
         if globalns is None:
             globalns = {}
         name, args, variadic = self.name, self.args, self.variadic
+        if name in type_params and args is None:
+            return f"``{name}``"
+        if name == "..." and args is None:
+            return "..."
+        if not name:
+            assert isinstance(args, tuple)
+            return (
+                "[" + ", ".join(a.crossref(globalns, type_params) for a in args) + "]"
+            )
         role = "obj"
+        external = ""
+        if name.startswith("builtins.") and hasattr(builtins, name[9:]):
+            name = name[9:]
+            globalns = {**globalns, name: getattr(builtins, name)}
+            external = "external+python:py:"
         if name in globalns:
-            obj = globalns[name]
+            obj = _resolve_lazy(globalns[name])
             if isinstance(obj, ModuleType):
                 role = "mod"
             elif isinstance(obj, property):
@@ -84,19 +117,21 @@ class ParsedType:
                     role = "class"
             elif isinstance(obj, FunctionType):
                 role = "func"
-        name_crossref = f":{role}:`{name}`"
+        name_crossref = f":{external}{role}:`{name}`"
         if args is None:
             return name_crossref
         if name in ("UnionType", "types.UnionType"):
             assert isinstance(args, tuple)
-            return " | ".join((arg.crossref(globalns) for arg in args))
+            return " | ".join((arg.crossref(globalns, type_params) for arg in args))
         if isinstance(args, str):
             _args = eval(f"({args}, )")
             arg_crossrefs = ", ".join(f"``{repr(arg)}``" for arg in _args)
         elif not args:
             arg_crossrefs = "()"
         else:
-            arg_crossrefs = ", ".join((arg.crossref(globalns) for arg in args))
+            arg_crossrefs = ", ".join(
+                (arg.crossref(globalns, type_params) for arg in args)
+            )
         if variadic:
             arg_crossrefs += ", ..."
         return rf"{name_crossref}\ [{arg_crossrefs}]"
@@ -229,12 +264,7 @@ def _parse_type_args(
     variadic = False
     for i, r in enumerate(arg_ranges):
         arg = _parse_type(annotation, r.start, r.stop)
-        if arg.name == "...":
-            if i < len(arg_ranges) - 1:
-                raise ValueError(
-                    "Ellipsis found in args, but not in last position, at "
-                    f"{start = }, {stop = }, {annotation[start:stop] = }, {annotation = }"
-                )
+        if arg.name == "..." and i == len(arg_ranges) - 1 and i > 0:
             variadic = True
             break
         args.append(arg)
@@ -269,11 +299,8 @@ def _parse_atom_type(annotation: str, start: int, stop: int) -> ParsedType:
         return _parsed_type(
             annotation, start, stop, name, annotation[r.start + 1 : r.stop - 1]
         )
-    if not name:
-        raise ValueError(
-            f"Found empty type name at "
-            f"{start = }, {stop = }, {annotation[start:stop] = }, {annotation = }"
-        )
+    if not name and not annotation[r.start + 1 : r.stop - 1].strip():
+        return _parsed_type(annotation, start, stop, name, ())
     args, variadic = _parse_type_args(annotation, r.start + 1, r.stop - 1)
     return _parsed_type(annotation, start, stop, name, args, variadic)
 
@@ -324,12 +351,20 @@ def class_tracking_handler(
 ### 3. Document Function Parameter and Return Types ###
 
 
-def _sigdoc(fun: FunctionType, lines: list[str]) -> None:
+def _type_param_names(*objs: Any) -> frozenset[str]:
+    """Collects the names of the PEP 695 type parameters of the given objects."""
+    return frozenset(
+        p.__name__ for obj in objs for p in getattr(obj, "__type_params__", ())
+    )
+
+
+def _sigdoc(fun: FunctionType, lines: list[str], owner: type | None = None) -> None:
     """Return doclines documenting parameter/return types for the given function."""
     doc = "\n".join(lines)
     lines.append("")
     # FIXME: if an :rtype: line already exists, remove it here and re-append it after all param type lines.
     globalns = fun.__globals__
+    type_params = _type_param_names(fun, owner)
     sig = inspect.signature(fun, annotation_format=annotationlib.Format.STRING)
     for p in sig.parameters.values():
         annotation = p.annotation
@@ -342,7 +377,7 @@ def _sigdoc(fun: FunctionType, lines: list[str]) -> None:
             annotation = str(annotation)
         try:
             t = parse_type(annotation)
-            tx = t.crossref(globalns)
+            tx = t.crossref(globalns, type_params)
         except Exception as e:
             logger.error(
                 f"Parsing param {p.name!r} type annotation {annotation!r},"
@@ -378,7 +413,7 @@ def _sigdoc(fun: FunctionType, lines: list[str]) -> None:
 
     try:
         t = parse_type(sig.return_annotation)
-        tx = t.crossref(globalns)
+        tx = t.crossref(globalns, type_params)
     except Exception as e:
         logger.error(
             f"Parsing return type annotation {annotation!r}," f" {type(e)}: {e}"
@@ -409,8 +444,9 @@ def signature_doc_handler(
         fun: FunctionType = obj.fget
     else:
         fun = obj
+    owner = _class_dict.get(".".join(fullname.split(".")[:-1]))
     try:
-        _sigdoc(fun, lines)
+        _sigdoc(fun, lines, owner)
     except Exception as e:
         msg = (
             f"In signature_doc_handler(app, {what = }, {fullname = }, ...),"
@@ -457,7 +493,7 @@ def attr_doc_handler(
                     logger.warning(f"Found non-string annotation: {type_annotation!r}.")
                     type_annotation = str(type_annotation)
                 t = parse_type(type_annotation)
-                tx = t.crossref()
+                tx = t.crossref(type_params=_type_param_names(parent_class))
                 if ":rtype:" not in "\n".join(lines):
                     lines.append(f":rtype: {tx}")
     except Exception as e:
@@ -617,6 +653,7 @@ def _build_fullname_dict(
     if obj_mod is not None:
         globalns = obj_mod.__dict__
         for g_name, g_obj in globalns.items():
+            g_obj = _resolve_lazy(g_obj)
             if isinstance(g_obj, (FunctionType, type)):
                 g_mod = inspect.getmodule(g_obj)
             elif isinstance(g_obj, ModuleType):

@@ -6,12 +6,12 @@ typing_validation.plugins
 PluginCheck
 -----------
 
-.. autodata:: typing_validation.plugins.PluginCheck
+.. autotype:: typing_validation.plugins.PluginCheck
 
 PluginComponents
 ----------------
 
-.. autodata:: typing_validation.plugins.PluginComponents
+.. autotype:: typing_validation.plugins.PluginComponents
 
 plugin_import
 -------------

@@ -160,13 +160,6 @@ $ cd docs && python make-api.py && sphinx-build -M html . _build -W
 
 The benchmark suite pulls v1 out of the **`v1.2.12` tag** with `git archive` and imports it alongside, so the comparison runs in one process. A tag rather than a branch, deliberately: it read `main` until v2 landed there, at which point it would have compared v2 against itself and reported no regression for ever. **`validate` must not be slower than v1** — the one number that may never regress, and the runner says so at the end.
 
-### Owed upstream to `sphinx-docscripts`
-
-Two bugs found here, neither reported yet.
-
-- **`autodoc_typehints.py` cannot parse a `Callable` parameter list.** `Callable[[Any], Literal[True]]` gives *"Found empty type name … annotation[start:stop] = '[Any]'"* — the nested list defeats the annotation parser. Worked around by naming the type: `type Validator = Callable[[Any], Literal[True]]`, which reads better anyway and is declared in `make-api.json`'s `type_aliases`.
-- **The RST title underline is generated at the template's length**, not the project's, so any name longer than `PROJECT_NAME` (12 characters) under-runs its underline. `typing-validation` is 17.
-
 ### Things CPython does that the house style does not expect
 
 - **Exceptions always have a `__dict__`**, whatever `__slots__` says. The slots still keep it empty, which is what they buy; "no instance `__dict__`" is unachievable here.
