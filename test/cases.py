@@ -16,6 +16,7 @@ to the catalogue has one obvious place to land.
 import collections
 import collections.abc as abc
 import enum
+import warnings
 from typing import (
     Annotated,
     Any,
@@ -36,6 +37,10 @@ from typing import (
     Union,
     runtime_checkable,
 )
+
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", DeprecationWarning)
+    from typing import ByteString
 
 # --------------------------------------------------------------------------
 # Fixtures referred to by the corpus below.
@@ -240,6 +245,10 @@ _valid(abc.Sized, [], "", {})
 _invalid(abc.Sized, 1, iter([]))
 _valid(abc.Buffer, b"", bytearray(), memoryview(b""))
 _invalid(abc.Buffer, "", [])
+_valid(ByteString, b"", bytearray(), memoryview(b""))
+_invalid(ByteString, "", [])
+_valid(list[ByteString], [], [b"", memoryview(b"")])
+_invalid(list[ByteString], [""], [b"", 1])
 
 # Parametric collections ----------------------------------------------------
 _valid(list[int], [], [1, 2], [True])

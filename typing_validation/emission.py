@@ -23,9 +23,10 @@ de-optimisation a plugin forces, for the same reason: you cannot inline code you
 do not have.
 """
 
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Buffer, Callable, Collection, Mapping
 from typing import Any, Literal, Union, get_args, get_origin
 
+from ._compat import is_bytestring_origin
 from .composition import Runner, Validator, runner_for, validator
 from .diagnosis import diagnose
 from .errors import UnsupportedTypeError, ValidationError
@@ -286,7 +287,13 @@ def _lines(
         return _lines(node.children[0], var, out, depth=depth, budget=budget)
     if form is TypeForm.CLASS or form is TypeForm.PROTOCOL:
         origin = get_origin(t)
-        name = out.constant(t if origin is None else origin, "cls")
+        if origin is None:
+            target = t
+        elif is_bytestring_origin(origin):
+            target = Buffer
+        else:
+            target = origin
+        name = out.constant(target, "cls")
         return [f"if not isinstance({var}, {name}):", "    return False"]
     if form is TypeForm.UNION:
         members = t.__args__

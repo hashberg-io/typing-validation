@@ -26,9 +26,10 @@ risks nothing. So a container *calls* the children that cannot descend and
 interpreter; on a recursive alias it is the safe one.
 """
 
-from collections.abc import Callable, Collection, Iterator, Mapping
+from collections.abc import Buffer, Callable, Collection, Iterator, Mapping
 from typing import Any, Literal, Union, get_args, get_origin
 
+from ._compat import is_bytestring_origin
 from .diagnosis import diagnose
 from .errors import UnsupportedTypeError, ValidationError
 from .nodes import TypeForm, TypeNode, node_for
@@ -344,7 +345,11 @@ _WRAPPERS = frozenset(
 
 def _isinstance_target(node: TypeNode, /) -> Any:
     origin = get_origin(node.t)
-    return node.t if origin is None else origin
+    if origin is None:
+        return node.t
+    if is_bytestring_origin(origin):
+        return Buffer
+    return origin
 
 
 def _any(val: Any, stack: Stack, unions: Unions) -> bool:
