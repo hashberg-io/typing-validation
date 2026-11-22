@@ -32,6 +32,8 @@ jobs:
           # out to git. A shallow clone would not have it.
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python }}
       - run: uv sync --group dev
       - name: Tests
         run: uv run --no-sync pytest
@@ -44,7 +46,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The version Read the Docs builds with, so that this job checks the
+      # documentation users are actually served.
       - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
       - run: uv sync --group docs --group dev
       # -W turns warnings into errors: a broken cross-reference is a broken
       # document, and Read the Docs runs sphinx directly without the generator,
