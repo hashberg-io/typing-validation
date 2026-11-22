@@ -220,6 +220,10 @@ v1 got both forms wrong. Bare `typing.NamedTuple` was listed as a validatable ps
 
 **Checks:** the value is a class, and is a subclass of `T`. `T` may be a class, a union of classes, or `Any` (which accepts any class).
 
+A class qualifies whatever its metaclass, so abstract base classes and enums are accepted, as are runtime-checkable protocols whose members are all methods.
+What it must also do is accept being the second argument of `issubclass`, and three kinds of class refuse: `TypedDict`s, protocols that are not runtime-checkable, and runtime-checkable protocols with non-method members.
+`Type[T]` over any of those, alone or as a union member, is unsupported.
+
 Bare `type` and bare `typing.Type` check only that the value is a class.
 
 **Does not check:** subtype relationships for anything other than classes and unions of classes — `[by design]`. `Type[list[int]]` and similar are unsupported: `issubclass` cannot express them, and inventing a bespoke subtype relation is out of scope.
