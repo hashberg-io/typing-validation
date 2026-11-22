@@ -413,6 +413,12 @@ def _typed_dict(
     lines = [f"if not isinstance({var}, {mapping}):", "    return False"]
     for key in sorted(t.__required_keys__):
         lines += [f"if {key!r} not in {var}:", "    return False"]
+    string = out.constant(str, "cls")
+    lines += [
+        f"for _k{depth} in {var}:",
+        f"    if not isinstance(_k{depth}, {string}):",
+        "        return False",
+    ]
     for label, child in zip(node.labels or (), node.children):
         item = f"_f{depth}"
         inner = _lines(child, item, out, depth=depth + 1, budget=budget)

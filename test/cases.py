@@ -362,9 +362,11 @@ _invalid(
     [],
     {1: "Jaws"},
 )
+_invalid(Movie, {"title": "Jaws", "year": 1975, 1: "x"})
 _valid(Movie, {"title": "Jaws", "year": 1975, "extra": object()})
 _valid(PartialMovie, {"title": "Jaws"}, {"title": "Jaws", "year": 1975})
 _invalid(PartialMovie, {"title": "Jaws", "year": "1975"}, {})
+_invalid(PartialMovie, {"title": "Jaws", 1: 1975})
 _valid(QualifiedMovie, {"title": "Jaws", "year": 1975})
 _valid(QualifiedMovie, {"title": "Jaws", "year": 1975, "tags": ["shark"]})
 _invalid(QualifiedMovie, {"title": "Jaws", "year": 1975, "tags": [1]})
