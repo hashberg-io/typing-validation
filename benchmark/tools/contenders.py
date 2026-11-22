@@ -99,7 +99,7 @@ class Contender:
     check: Callable[[Any, Any], bool]
     """Ask the question directly, without a prepared validator."""
 
-    usage: "Usage" = Usage.AD_HOC
+    usage: Usage = Usage.AD_HOC
     """Which mechanism's table this contender belongs in."""
 
     note: str = ""

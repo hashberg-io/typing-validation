@@ -97,11 +97,11 @@ class ValidationError(TypeError):
     _t: Any
     """The type the value was validated against."""
 
-    _failure: "ValidationFailure | None"
+    _failure: ValidationFailure | None
     """The structured explanation, when one was built."""
 
     def __new__(
-        cls, val: Any, t: Any, failure: "ValidationFailure | None" = None, /
+        cls, val: Any, t: Any, failure: ValidationFailure | None = None, /
     ) -> Self:
         """
         The failure is optional because not every raiser builds one:
@@ -115,7 +115,7 @@ class ValidationError(TypeError):
         return self
 
     @property
-    def failure(self) -> "ValidationFailure | None":
+    def failure(self) -> ValidationFailure | None:
         """
         The structured explanation of what went wrong, and where.
 
