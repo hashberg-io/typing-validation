@@ -24,7 +24,7 @@ Keep them that way.
 | **2.2.1** | patch: messages survive a value or type whose `__repr__` raises; `Type[T]` support decided from `T` alone | **released** (tag `v2.2.1`) |
 | **2.2.2** | patch: `ByteString` validated against `Buffer` without deprecation warnings on 3.15 (#28, Miroslav Suchý); `Type[T]` accepts any class `issubclass` can take (#26, Egor Vorontsov); compiled validators reject non-string `TypedDict` keys; `typing_extensions` `TypedDict`s recognised; a nested `TypedDict`'s missing key named correctly; `TypedDict` fields located as `value['year']` rather than `value.year` | **released** (tag `v2.2.2`) |
 | — | marshalling — persistent bytecode cache | **measured and declined.** Not blocked, not deferred: `benchmark/marshalling.py` measured what it would buy and the answer was milliseconds. See DESIGN.md §14 and *Marshalling* below |
-| **2.3.0** | Python 3.15 supported alongside 3.14; closed `TypedDict`s and `extra_items`, `frozendict[K, V]` and sentinels validated | **on the `python-3-15` branch**, after 2.2.2 |
+| **2.3.0** | Python 3.15 supported alongside 3.14; closed `TypedDict`s and `extra_items`, `frozendict[K, V]` and sentinels validated | **released** (tag `v2.3.0`) |
 | next | a runtime subtype relation | unblocked by Python 3.15, not started — see *Python 3.15* |
 
 Each stage manufactures the oracle for the next, so the order is not negotiable: `validator` is conformance-tested against `validate`, and `compiled_validator` against both.
