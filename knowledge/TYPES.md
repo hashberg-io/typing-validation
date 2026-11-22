@@ -111,7 +111,9 @@ The unparametrised forms: `list`, `tuple`, `set`, `frozenset`, `dict`, `collecti
 **Checks:** `isinstance(val, t)` against the runtime class or ABC.
 
 The deprecated `typing` aliases (`typing.List`, `typing.Dict`, `typing.Deque`, …) are accepted and mean exactly their builtin or `collections.abc` counterparts.
-`typing.ByteString` still exists in 3.14 and is accepted, mapping to `collections.abc.Buffer`.
+`typing.ByteString` is deprecated and slated for removal in 3.17.
+Until then it is accepted and means `collections.abc.Buffer`, so `memoryview` conforms.
+Validating against it never touches the deprecated `collections.abc.ByteString` class, so the library emits no `DeprecationWarning` on its users' behalf.
 
 ### Parametric collections
 
