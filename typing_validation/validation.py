@@ -584,15 +584,21 @@ def _type_of_target(
     (arg,) = args
     if arg is Any:
         return None
-    if isinstance(arg, type):
-        return arg
-    if type(arg) is Union:  # type: ignore[comparison-overlap]
-        members = arg.__args__
-        for member in members:
-            if type(member) is not type:
-                raise UnsupportedTypeError(t, _TYPE_ARG_EXPLANATION)
-        return members  # type: ignore[no-any-return]
-    raise UnsupportedTypeError(t, _TYPE_ARG_EXPLANATION)
+    union = type(arg) is Union  # type: ignore[comparison-overlap]
+    members = arg.__args__ if union else (arg,)
+    for member in members:
+        if type(member) is type:
+            continue
+        if not isinstance(member, type):
+            raise UnsupportedTypeError(t, _TYPE_ARG_EXPLANATION)
+        try:
+            issubclass(object, member)
+        except TypeError:
+            raise UnsupportedTypeError(
+                t, _TYPE_ARG_REFUSED_EXPLANATION
+            ) from None
+    target: type | tuple[type, ...] = members if union else arg
+    return target
 
 
 def _check_generic_class(
@@ -672,6 +678,12 @@ _TYPE_ARG_EXPLANATION = (
     "Type[T] supports T being a class, a union of classes, or Any. issubclass "
     "cannot express anything else, and this library does not invent a subtype "
     "relation of its own."
+)
+
+_TYPE_ARG_REFUSED_EXPLANATION = (
+    "Type[T] is checked with issubclass, which refuses this T: TypedDicts, "
+    "protocols that are not runtime-checkable, and protocols with non-method "
+    "members all raise when used as its second argument."
 )
 
 

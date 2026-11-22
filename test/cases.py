@@ -14,6 +14,7 @@ to the catalogue has one obvious place to land.
 """
 
 import collections
+from abc import ABC
 import collections.abc as abc
 import enum
 from typing import (
@@ -98,6 +99,19 @@ class Sized(Protocol):
 
 class NotRuntime(Protocol):
     def frobnicate(self) -> None: ...
+
+
+@runtime_checkable
+class HasX(Protocol):
+    x: int
+
+
+class Shape(ABC):
+    pass
+
+
+class Square(Shape):
+    pass
 
 
 class Box[T]:
@@ -378,6 +392,14 @@ _valid(type[Union[int, str]], int, str, bool)
 _invalid(type[Union[int, str]], float, 1)
 _valid(type[Any], int, Plain)
 _invalid(type[Any], 1)
+_valid(type[Shape], Shape, Square)
+_invalid(type[Shape], int, Square())
+_valid(type[Colour], Colour)
+_invalid(type[Colour], int, Colour.RED)
+_valid(type[Sized], list, str, dict)
+_invalid(type[Sized], int)
+_valid(type[Union[Shape, int]], Square, int, bool)
+_invalid(type[Union[Shape, int]], str, Square())
 
 # Protocols -----------------------------------------------------------------
 _valid(Sized, [], "", {})
@@ -444,6 +466,11 @@ UNSUPPORTED_TYPES.extend(
         BadPoint,
         collections.namedtuple,  # a factory function, not a type
         type[list[int]],  # issubclass cannot express it
+        type[Movie],  # issubclass refuses a TypedDict
+        type[NotRuntime],
+        type[HasX],  # issubclass refuses a protocol with data members
+        type[Union[Square, Movie]],
+        type[Union[abc.Hashable, Movie]],
         object(),
         42,
         list[Callable[[int], int]],  # poisoned by its item type
@@ -467,6 +494,11 @@ _unsupported(BadMovie, {"title": "Jaws", "other": 1})
 _unsupported(BadPoint, BadPoint(1, 2))
 _unsupported(collections.namedtuple, 1, None)
 _unsupported(type[list[int]], int, list)
+_unsupported(type[Movie], dict, 1)
+_unsupported(type[NotRuntime], Plain, 1)
+_unsupported(type[HasX], Plain, 1)
+_unsupported(type[Union[Square, Movie]], Square, 1)
+_unsupported(type[Union[abc.Hashable, Movie]], int, list, 1)
 _unsupported(object(), 1, None)
 _unsupported(42, 1, None)
 _unsupported(list[Callable[[int], int]], [lambda: 1])
