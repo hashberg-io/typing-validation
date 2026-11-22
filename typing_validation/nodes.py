@@ -119,6 +119,9 @@ class TypeForm(enum.Enum):
     PROTOCOL = "protocol"
     """A runtime-checkable protocol."""
 
+    SENTINEL = "sentinel"
+    """A sentinel object (PEP 661), which only that object is valid for."""
+
     GENERIC_CLASS = "generic class"
     """A parametrised class whose arguments cannot be checked, by design."""
 
@@ -504,6 +507,8 @@ def _classify(t: Any, /) -> Classified:
         return _plain(TypeForm.TYPE_VAR)
     if tt is NewType:
         return _with(TypeForm.NEW_TYPE, t.__supertype__)
+    if tt is _SENTINEL or _is_extensions_sentinel(tt):
+        return _plain(TypeForm.SENTINEL)
     if isinstance(t, (str, ForwardRef)):
         return _unsupported(_INLINE_FORWARD_REF_REASON)
     if tt is type or isinstance(t, type):
@@ -664,6 +669,22 @@ def _is_extensions_typed_dict(t: Any, /) -> bool:
     """
     extensions = sys.modules.get("typing_extensions")
     return extensions is not None and bool(extensions.is_typeddict(t))
+
+
+_SENTINEL = getattr(builtins, "sentinel", None)
+"""The class of PEP 661 sentinels, a builtin from 3.15."""
+
+
+def _is_extensions_sentinel(tt: type, /) -> bool:
+    """
+    Whether a class is ``typing_extensions.Sentinel``, which is how 3.14 spells
+    the builtin. Such a sentinel can only exist once ``typing_extensions`` is
+    imported, so asking it imports nothing.
+    """
+    extensions = sys.modules.get("typing_extensions")
+    return extensions is not None and tt is getattr(
+        extensions, "Sentinel", None
+    )
 
 
 _OPEN = object()

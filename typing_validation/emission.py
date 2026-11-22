@@ -281,6 +281,9 @@ def _lines(
         return []
     if form is TypeForm.NONE:
         return [f"if {var} is not None:", "    return False"]
+    if form is TypeForm.SENTINEL:
+        name = out.constant(t, "sentinel")
+        return [f"if {var} is not {name}:", "    return False"]
     if form in _WRAPPERS:
         if not node.children:
             return []

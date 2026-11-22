@@ -96,6 +96,15 @@ This is deliberate: the runtime type lattice is the one we validate against, and
 
 **Checks:** `val is None`. Both the `None` spelling and `types.NoneType` are accepted as the type.
 
+### Sentinels
+
+**Supported** · **new**
+
+**Checks:** `val is t`. A sentinel (PEP 661) used as a type stands for itself, as `None` does, so `int | MISSING` admits any int and that one object.
+
+From 3.15 sentinels are the builtin `sentinel`.
+On 3.14 they are `typing_extensions.Sentinel`, which the library recognises without importing.
+
 ### `Any`
 
 **Supported** · *v1 parity*

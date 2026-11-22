@@ -486,6 +486,28 @@ if sys.version_info >= (3, 15):
     _valid(dict[str, ExtraInts], {"k": {"x": "a", "y": 1}})
     _invalid(dict[str, ExtraInts], {"k": {"x": "a", "y": "b"}})
 
+# Sentinels (PEP 661), a builtin from 3.15, which stand for themselves.
+if sys.version_info >= (3, 15):
+    MISSING = sentinel("MISSING")
+    OTHER = sentinel("OTHER")
+    _valid(MISSING, MISSING)
+    _invalid(MISSING, OTHER, sentinel("MISSING"), None, "MISSING")
+    _valid(int | MISSING, 1, MISSING)
+    _invalid(int | MISSING, "a", None, OTHER)
+    _valid(MISSING | None, None, MISSING)
+    _valid(list[int | MISSING], [], [1, MISSING])
+    _invalid(list[int | MISSING], [1, OTHER])
+    _valid(dict[str, str | MISSING], {"a": "b", "c": MISSING})
+    _invalid(dict[str, str | MISSING], {"a": OTHER})
+
+# typing_extensions.Sentinel, which is how 3.14 spells them.
+if importlib.util.find_spec("typing_extensions") is not None and hasattr(
+    typing_extensions, "Sentinel"
+):
+    EXTENSIONS_MISSING = typing_extensions.Sentinel("EXTENSIONS_MISSING")
+    _valid(EXTENSIONS_MISSING, EXTENSIONS_MISSING)
+    _invalid(EXTENSIONS_MISSING, None, 1, "EXTENSIONS_MISSING")
+
 # frozendict, a builtin from 3.15 (PEP 814), checked as a mapping.
 if sys.version_info >= (3, 15):
     _valid(frozendict, frozendict(), frozendict({"a": 1}))

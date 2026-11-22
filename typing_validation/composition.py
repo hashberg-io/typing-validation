@@ -299,6 +299,8 @@ def _compose(node: TypeNode, /) -> Composed:
         return _any, False
     if form is TypeForm.NONE:
         return _none, False
+    if form is TypeForm.SENTINEL:
+        return _identical(t), False
     if form is TypeForm.CLASS or form is TypeForm.PROTOCOL:
         return _instance_of(_isinstance_target(node)), False
     if form is TypeForm.ITERATOR:
@@ -362,6 +364,13 @@ def _none(val: Any, stack: Stack, unions: Unions) -> bool:
 
 def _any_named_tuple(val: Any, stack: Stack, unions: Unions) -> bool:
     return isinstance(val, tuple) and hasattr(type(val), "_fields")
+
+
+def _identical(target: Any, /) -> Check:
+    def check(val: Any, stack: Stack, unions: Unions) -> bool:
+        return val is target
+
+    return check
 
 
 def _instance_of(cls: Any, /) -> Check:

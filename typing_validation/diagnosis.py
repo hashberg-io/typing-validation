@@ -61,6 +61,9 @@ class Detail(enum.Enum):
     NOT_NONE = "not None"
     """The type is ``None`` and the value is not."""
 
+    NOT_THE_SENTINEL = "not the sentinel"
+    """The type is a sentinel (PEP 661) and the value is not that object."""
+
     NO_LITERAL = "no matching literal"
     """The value equals none of the literals, at its own type."""
 
@@ -510,6 +513,10 @@ def _expand(val: Any, t: Any, location: Location | None, /) -> _Frame:
         if val is None:
             return _ok(val, t, location)
         return _bad(val, t, location, Detail.NOT_NONE)
+    if form is TypeForm.SENTINEL:
+        if val is t:
+            return _ok(val, t, location)
+        return _bad(val, t, location, Detail.NOT_THE_SENTINEL)
     if form is TypeForm.CLASS or form is TypeForm.PROTOCOL:
         if isinstance(val, _isinstance_target(node)):
             return _ok(val, t, location)

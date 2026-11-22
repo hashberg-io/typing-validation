@@ -458,6 +458,21 @@ def _check(val: Any, t: Any, /) -> bool:
         return False
 
 
+_SENTINEL = getattr(builtins, "sentinel", None)
+"""The class of PEP 661 sentinels, a builtin from 3.15."""
+
+
+def _is_extensions_sentinel(tt: type, /) -> bool:
+    """
+    Whether a class is ``typing_extensions.Sentinel``, which is how 3.14 spells
+    the builtin, asked without importing it.
+    """
+    extensions = sys.modules.get("typing_extensions")
+    return extensions is not None and tt is getattr(
+        extensions, "Sentinel", None
+    )
+
+
 def _check_bare(
     val: Any, t: Any, tt: type, stack: list[tuple[Any, Any]], /
 ) -> bool:
@@ -492,6 +507,9 @@ def _check_bare(
         # report UserId rather than int.
         stack.append((val, t.__supertype__))
         return True
+    if tt is _SENTINEL or _is_extensions_sentinel(tt):
+        # A sentinel (PEP 661) stands for itself, as None does.
+        return val is t
     if t is NamedTuple:
         # "Any named tuple instance", which is what type checkers enforce. There
         # is no nominal marker to check — NamedTuple is a function, and
