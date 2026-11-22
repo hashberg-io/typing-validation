@@ -546,14 +546,26 @@ def _classify_type_of(args: tuple[Any, ...], /) -> Classified:
     if not args:
         return _plain(TypeForm.TYPE_OF)
     (arg,) = args
-    if arg is Any or type(arg) is type:
+    if arg is Any:
         return _with(TypeForm.TYPE_OF, arg)
-    if type(arg) is Union:  # type: ignore[comparison-overlap]
-        for member in arg.__args__:
-            if type(member) is not type:
-                return _unsupported(_TYPE_ARG_REASON)
-        return _with(TypeForm.TYPE_OF, arg)
-    return _unsupported(_TYPE_ARG_REASON)
+    union = type(arg) is Union  # type: ignore[comparison-overlap]
+    members = arg.__args__ if union else (arg,)
+    for member in members:
+        if not isinstance(member, type):
+            return _unsupported(_TYPE_ARG_REASON)
+        if not _accepted_by_issubclass(member):
+            return _unsupported(_TYPE_ARG_REFUSED_REASON)
+    return _with(TypeForm.TYPE_OF, arg)
+
+
+def _accepted_by_issubclass(cls: type, /) -> bool:
+    if type(cls) is type:
+        return True
+    try:
+        issubclass(object, cls)
+    except TypeError:
+        return False
+    return True
 
 
 def _classify_parametrised_class(
@@ -632,4 +644,10 @@ _TYPE_ARG_REASON = (
     "Type[T] supports T being a class, a union of classes, or Any. issubclass "
     "cannot express anything else, and this library does not invent a subtype "
     "relation of its own."
+)
+
+_TYPE_ARG_REFUSED_REASON = (
+    "Type[T] is checked with issubclass, which refuses this T: TypedDicts, "
+    "protocols that are not runtime-checkable, and protocols with non-method "
+    "members all raise when used as its second argument."
 )
