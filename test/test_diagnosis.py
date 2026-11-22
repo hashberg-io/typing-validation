@@ -125,6 +125,16 @@ class TestWhereTheFailureWas:
         assert failure is not None
         assert failure.detail is Detail.MISSING_KEY
 
+    def test_a_missing_key_is_named_however_deep_the_typed_dict(self) -> None:
+        for val, t, at in [
+            ({"title": "Jaws"}, Movie, "value"),
+            ([{"title": "Jaws"}], list[Movie], "value[0]"),
+            ({"a": {"title": "Jaws"}}, dict[str, Movie], "value['a']"),
+        ]:
+            message = str(_fails(val, t))
+            assert "missing required key 'year'" in message, message
+            assert f"at:  {at}" in message, message
+
     def test_a_bad_typed_dict_field(self) -> None:
         failure = _fails({"title": "Jaws", "year": "x"}, Movie).failure
         assert failure is not None

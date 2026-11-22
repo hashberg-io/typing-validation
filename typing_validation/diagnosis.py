@@ -271,7 +271,7 @@ def _plural(n: int, noun: str, /) -> str:
 def _says(f: ValidationFailure, /) -> str:
     """What went wrong, in one line, at the place worth looking at."""
     if f.detail is Detail.MISSING_KEY:
-        return f"missing required key {safe_repr(f.location.at)}"  # type: ignore[union-attr]
+        return f"missing required key {safe_repr(_missing_key(f.val, f.t))}"
     if f.detail is Detail.NON_STRING_KEY:
         return f"keys must be strings, got {type(f.val).__name__}"
     if f.detail is Detail.WRONG_LENGTH:
@@ -650,14 +650,8 @@ def _expand_typed_dict(
 ) -> _Frame:
     if not isinstance(val, Mapping):
         return _bad(val, t, location, Detail.NOT_AN_INSTANCE)
-    for key in t.__required_keys__:
-        if key not in val:
-            return _bad(
-                val,
-                t,
-                Location(Place.FIELD, key) if location is None else location,
-                Detail.MISSING_KEY,
-            )
+    if _missing_key(val, t) is not None:
+        return _bad(val, t, location, Detail.MISSING_KEY)
     fields = dict(zip(node.labels or (), node.children))
     frame = _ok(val, t, location)
     for key, item in val.items():
@@ -668,6 +662,18 @@ def _expand_typed_dict(
             continue
         frame.todo.append((item, child.t, Location(Place.FIELD, key)))
     return frame
+
+
+def _missing_key(val: Any, t: Any, /) -> str | None:
+    """
+    The first required key of a ``TypedDict`` that a mapping lacks, in sorted
+    order so that the one reported does not vary from run to run.
+    """
+    keys: list[str] = sorted(t.__required_keys__)
+    for key in keys:
+        if key not in val:
+            return key
+    return None
 
 
 def _expand_type_of(
