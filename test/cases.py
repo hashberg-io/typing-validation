@@ -486,6 +486,21 @@ if sys.version_info >= (3, 15):
     _valid(dict[str, ExtraInts], {"k": {"x": "a", "y": 1}})
     _invalid(dict[str, ExtraInts], {"k": {"x": "a", "y": "b"}})
 
+# frozendict, a builtin from 3.15 (PEP 814), checked as a mapping.
+if sys.version_info >= (3, 15):
+    _valid(frozendict, frozendict(), frozendict({"a": 1}))
+    _invalid(frozendict, {}, [])
+    _valid(frozendict[str, int], frozendict(), frozendict({"a": 1, "b": 2}))
+    _invalid(
+        frozendict[str, int],
+        frozendict({"a": "x"}),
+        frozendict({1: 1}),
+        {"a": 1},
+    )
+    _valid(dict[str, frozendict[str, int]], {"k": frozendict({"a": 1})})
+    _invalid(dict[str, frozendict[str, int]], {"k": frozendict({"a": "x"})})
+    _valid(abc.Mapping[str, int], frozendict({"a": 1}))
+
 # The same, defined with typing_extensions, which is how 3.14 spells them.
 if importlib.util.find_spec("typing_extensions") is not None:
 

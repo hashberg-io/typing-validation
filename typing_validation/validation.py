@@ -17,6 +17,7 @@ binds this module to the other mechanisms, and the conformance suite is what
 keeps them honest.
 """
 
+import builtins
 import sys
 import typing
 from collections import defaultdict, deque
@@ -99,7 +100,17 @@ _ITEM_ORIGINS = frozenset(
 )
 """Origins whose every item is checked against a single type argument."""
 
-_MAPPING_ORIGINS = frozenset({dict, defaultdict, Mapping, MutableMapping})
+_MAPPING_ORIGINS = frozenset(
+    # frozendict is a builtin from 3.15; on 3.14 this falls back to dict, which
+    # is already in the set.
+    {
+        dict,
+        defaultdict,
+        Mapping,
+        MutableMapping,
+        getattr(builtins, "frozendict", dict),
+    }
+)
 """Origins whose every key and value is checked against a type argument each."""
 
 _ITERATOR_ORIGINS = frozenset({Iterator})

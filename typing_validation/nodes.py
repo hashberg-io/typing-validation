@@ -16,6 +16,7 @@ shares nothing with the interpreter.
 # compositor and the source emitter are further methods on the node, for the same
 # reason the rest are. See DESIGN.md §3.3 and §3.4.
 
+import builtins
 import enum
 import sys
 import typing
@@ -159,7 +160,17 @@ _COLLECTION_ORIGINS = frozenset(
         MutableSequence,
     }
 )
-_MAPPING_ORIGINS = frozenset({dict, defaultdict, Mapping, MutableMapping})
+_MAPPING_ORIGINS = frozenset(
+    # frozendict is a builtin from 3.15; on 3.14 this falls back to dict, which
+    # is already in the set.
+    {
+        dict,
+        defaultdict,
+        Mapping,
+        MutableMapping,
+        getattr(builtins, "frozendict", dict),
+    }
+)
 _ITERATOR_ORIGINS = frozenset({Iterator})
 _MAYBE_ITEM_ORIGINS = frozenset({Iterable, Container})
 

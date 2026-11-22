@@ -106,7 +106,7 @@ This is deliberate: the runtime type lattice is the one we validate against, and
 
 **Supported** · *v1 parity*
 
-The unparametrised forms: `list`, `tuple`, `set`, `frozenset`, `dict`, `collections.deque`, `collections.defaultdict`, and the abstract base classes `Collection`, `Set`, `MutableSet`, `Sequence`, `MutableSequence`, `Iterable`, `Iterator`, `Container`, `Mapping`, `MutableMapping`, `Hashable`, `Sized`, `Buffer`.
+The unparametrised forms: `list`, `tuple`, `set`, `frozenset`, `dict`, `frozendict` (from 3.15), `collections.deque`, `collections.defaultdict`, and the abstract base classes `Collection`, `Set`, `MutableSet`, `Sequence`, `MutableSequence`, `Iterable`, `Iterator`, `Container`, `Mapping`, `MutableMapping`, `Hashable`, `Sized`, `Buffer`.
 
 **Checks:** `isinstance(val, t)` against the runtime class or ABC.
 
@@ -130,7 +130,7 @@ For unordered collections the index is a position in iteration order and is **no
 
 **Supported** · *v1 parity*
 
-`dict[K, V]`, `defaultdict[K, V]`, `Mapping[K, V]`, `MutableMapping[K, V]`.
+`dict[K, V]`, `defaultdict[K, V]`, `frozendict[K, V]` (from 3.15, PEP 814), `Mapping[K, V]`, `MutableMapping[K, V]`.
 
 **Checks:** `isinstance(val, origin)`, then every key against `K` and every value against `V`.
 
