@@ -504,8 +504,12 @@ def _tuple(args: tuple[Any, ...], node: TypeNode, /) -> Composed:
 
 def _typed_dict(t: Any, node: TypeNode, /) -> Composed:
     required = frozenset(t.__required_keys__)
-    fields = dict(
-        zip(node.labels or (), (_descend(c) for c in _children_of(node)))
+    labels = node.labels or ()
+    children = _children_of(node)
+    fields = dict(zip(labels, (_descend(c) for c in children)))
+    closed = node.closed
+    extra = (
+        _descend(children[len(labels)]) if len(children) > len(labels) else None
     )
 
     def check(val: Any, stack: Stack, unions: Unions) -> bool:
@@ -518,7 +522,12 @@ def _typed_dict(t: Any, node: TypeNode, /) -> Composed:
             if not isinstance(key, str):
                 return False
             field = fields.get(key)
-            if field is not None and not field(item, stack, unions):
+            if field is not None:
+                if not field(item, stack, unions):
+                    return False
+            elif closed:
+                return False
+            elif extra is not None and not extra(item, stack, unions):
                 return False
         return True
 

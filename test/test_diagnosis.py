@@ -27,6 +27,7 @@ from typing_validation.diagnosis import (
     diagnose,
 )
 
+from . import cases
 from .cases import INVALID, JSON, Movie, Point, UserId
 
 
@@ -134,6 +135,25 @@ class TestWhereTheFailureWas:
             message = str(_fails(val, t))
             assert "missing required key 'year'" in message, message
             assert f"at:  {at}" in message, message
+
+    def test_an_undeclared_key_is_named_when_the_typed_dict_is_closed(
+        self,
+    ) -> None:
+        pytest.importorskip("typing_extensions")
+        error = _fails(
+            [{"x": 1}, {"x": 2, "y": 3}], list[cases.ExtensionsClosed]
+        )
+        assert error.failure is not None
+        message = str(error)
+        assert "key not allowed: 'y'" in message, message
+        assert "at:  value[1]" in message, message
+        assert Detail.UNEXPECTED_KEY in {f.detail for f in error.failure.walk()}
+
+    def test_an_extra_item_is_reached_as_a_key(self) -> None:
+        pytest.importorskip("typing_extensions")
+        message = str(_fails({"x": "a", "y": "b"}, cases.ExtensionsExtraInts))
+        assert "expected int" in message, message
+        assert "at:  value['y']" in message, message
 
     def test_fields_are_reached_as_keys_or_attributes(self) -> None:
         message = str(_fails([{"title": "Jaws", "year": "x"}], list[Movie]))

@@ -18,6 +18,7 @@ from abc import ABC
 import collections.abc as abc
 import enum
 import importlib.util
+import sys
 import warnings
 from typing import (
     Annotated,
@@ -400,6 +401,110 @@ if importlib.util.find_spec("typing_extensions") is not None:
     _valid(NestedExtensionsMovie, {"title": "Jaws", "sequel": {"title": "2"}})
     _invalid(NestedExtensionsMovie, {"title": "Jaws", "sequel": {"year": 1978}})
 
+# Closed TypedDicts and extra items (PEP 728). The class records only its own
+# arguments, so inheritance is the part a validator has to work out.
+if sys.version_info >= (3, 15):
+    from typing import Never
+
+    class Closed(TypedDict, closed=True):
+        x: int
+
+    class InheritsClosed(Closed):
+        pass
+
+    # A type checker rejects the next two definitions. The runtime accepts them,
+    # and a class's own keys and arguments are what it is validated by.
+    class ExtendsClosed(Closed):
+        y: int  # type: ignore[misc]
+
+    class Reopened(Closed, closed=False):  # type: ignore[misc]
+        pass
+
+    class ExtraInts(TypedDict, extra_items=int):  # type: ignore[call-arg]
+        x: str
+
+    class InheritsExtraInts(ExtraInts):
+        pass
+
+    class ReadOnlyExtras(TypedDict, extra_items=ReadOnly[int]):  # type: ignore[call-arg]
+        x: str
+
+    class NeverExtras(TypedDict, extra_items=Never):  # type: ignore[call-arg]
+        x: int
+
+    class NoneExtras(TypedDict, extra_items=None):  # type: ignore[call-arg]
+        x: int
+
+    class Tree(TypedDict, extra_items="Tree"):  # type: ignore[call-arg]
+        value: int
+
+    ClosedFunctional = TypedDict("ClosedFunctional", {"x": int}, closed=True)
+
+    class ClosedY(TypedDict, closed=True):
+        y: int
+
+    class Conflicted(ClosedY, ExtraInts):  # type: ignore[misc]
+        pass
+
+    class CallableExtras(TypedDict, extra_items=Callable[[int], int]):  # type: ignore[call-arg]
+        x: int
+
+    class DanglingExtras(  # type: ignore[call-arg]
+        TypedDict, extra_items="NeverDefinedAnywhere"
+    ):
+        x: int
+
+    _valid(Closed, {"x": 1})
+    _invalid(Closed, {"x": 1, "y": 2}, {"x": 1, 2: 3}, {})
+    _valid(InheritsClosed, {"x": 1})
+    _invalid(InheritsClosed, {"x": 1, "y": 2})
+    _valid(ExtendsClosed, {"x": 1, "y": 2})
+    _invalid(ExtendsClosed, {"x": 1, "y": 2, "z": 3})
+    _valid(Reopened, {"x": 1, "y": object()})
+    _valid(ExtraInts, {"x": "a"}, {"x": "a", "y": 1, "z": True})
+    _invalid(ExtraInts, {"x": "a", "y": "b"}, {"x": 1}, {"x": "a", 1: 1})
+    _valid(InheritsExtraInts, {"x": "a", "y": 2})
+    _invalid(InheritsExtraInts, {"x": "a", "y": "b"})
+    _valid(ReadOnlyExtras, {"x": "a", "y": 1})
+    _invalid(ReadOnlyExtras, {"x": "a", "y": "b"})
+    _valid(NeverExtras, {"x": 1})
+    _invalid(NeverExtras, {"x": 1, "y": 2})
+    _valid(NoneExtras, {"x": 1}, {"x": 1, "y": None})
+    _invalid(NoneExtras, {"x": 1, "y": 0})
+    _valid(
+        Tree,
+        {"value": 1},
+        {"value": 1, "left": {"value": 2, "a": {"value": 3}}},
+    )
+    _invalid(
+        Tree, {"value": 1, "left": {"value": "x"}}, {"value": 1, "left": 3}
+    )
+    _valid(ClosedFunctional, {"x": 1})
+    _invalid(ClosedFunctional, {"x": 1, "y": 2})
+    _valid(list[Closed], [{"x": 1}, {"x": 2}])
+    _invalid(list[Closed], [{"x": 1}, {"x": 2, "y": 3}])
+    _valid(dict[str, ExtraInts], {"k": {"x": "a", "y": 1}})
+    _invalid(dict[str, ExtraInts], {"k": {"x": "a", "y": "b"}})
+
+# The same, defined with typing_extensions, which is how 3.14 spells them.
+if importlib.util.find_spec("typing_extensions") is not None:
+
+    class ExtensionsClosed(typing_extensions.TypedDict, closed=True):
+        x: int
+
+    class ExtensionsInheritsClosed(ExtensionsClosed):
+        pass
+
+    class ExtensionsExtraInts(typing_extensions.TypedDict, extra_items=int):  # type: ignore[call-arg]
+        x: str
+
+    _valid(ExtensionsClosed, {"x": 1})
+    _invalid(ExtensionsClosed, {"x": 1, "y": 2})
+    _valid(ExtensionsInheritsClosed, {"x": 1})
+    _invalid(ExtensionsInheritsClosed, {"x": 1, "y": 2})
+    _valid(ExtensionsExtraInts, {"x": "a", "y": 1})
+    _invalid(ExtensionsExtraInts, {"x": "a", "y": "b"})
+
 # NamedTuple ----------------------------------------------------------------
 _valid(NamedTuple, Point(1, 2), LegacyPoint(1, 2))
 _invalid(NamedTuple, (1, 2), 1, "ab", [1, 2])
@@ -539,3 +644,11 @@ _unsupported(object(), 1, None)
 _unsupported(42, 1, None)
 _unsupported(list[Callable[[int], int]], [lambda: 1])
 _unsupported(dict[str, Self], {"a": 1})  # type: ignore[misc]
+
+if sys.version_info >= (3, 15):
+    UNSUPPORTED_TYPES.extend([Conflicted, CallableExtras, DanglingExtras])
+    # Conflicting settings make the TypedDict itself unsupported, so every value
+    # reaches it. An unsupported extra-items type is reached by an extra key.
+    _unsupported(Conflicted, {"x": "a"}, 1)
+    _unsupported(CallableExtras, {"x": 1, "y": lambda v: v})
+    _unsupported(DanglingExtras, {"x": 1, "y": 1})
