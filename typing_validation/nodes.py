@@ -17,6 +17,7 @@ shares nothing with the interpreter.
 # reason the rest are. See DESIGN.md §3.3 and §3.4.
 
 import enum
+import sys
 from collections import defaultdict, deque
 from collections.abc import (
     Callable,
@@ -512,7 +513,7 @@ def _classify(t: Any, /) -> Classified:
 
 
 def _classify_class(t: Any, /) -> Classified:
-    if is_typeddict(t):
+    if is_typeddict(t) or _is_extensions_typed_dict(t):
         fields = _typed_dict_fields(t)
         names = tuple(name for name, _ in fields)
         return TypeForm.TYPED_DICT, tuple(a for _, a in fields), names, None
@@ -605,6 +606,16 @@ def _classify_parametrised_class(
         return _plain(TypeForm.PLUGIN)
     children = tuple(args[i] for i in positions if i < len(args))
     return TypeForm.PLUGIN, children, None, None
+
+
+def _is_extensions_typed_dict(t: Any, /) -> bool:
+    """
+    Whether a class is a ``TypedDict`` defined with ``typing_extensions``, which
+    :func:`typing.is_typeddict` does not recognise. Such a class can only exist
+    once ``typing_extensions`` is imported, so asking it imports nothing.
+    """
+    extensions = sys.modules.get("typing_extensions")
+    return extensions is not None and bool(extensions.is_typeddict(t))
 
 
 def _typed_dict_fields(t: Any, /) -> list[tuple[str, Any]]:

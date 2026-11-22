@@ -17,6 +17,7 @@ import collections
 from abc import ABC
 import collections.abc as abc
 import enum
+import importlib.util
 import warnings
 from typing import (
     Annotated,
@@ -374,6 +375,30 @@ _invalid(QualifiedMovie, {"title": "Jaws"})
 _valid(NestedMovie, {"title": "Jaws"})
 _valid(NestedMovie, {"title": "Jaws", "sequel": {"title": "Jaws 2"}})
 _invalid(NestedMovie, {"title": "Jaws", "sequel": {"year": 1978}})
+
+# TypedDicts defined with typing_extensions, which typing.is_typeddict does not
+# recognise. The package comes with the type checker, so it is normally here.
+if importlib.util.find_spec("typing_extensions") is not None:
+    import typing_extensions
+
+    class ExtensionsMovie(typing_extensions.TypedDict):
+        title: str
+        year: typing_extensions.NotRequired[int]
+
+    class NestedExtensionsMovie(typing_extensions.TypedDict):
+        title: str
+        sequel: typing_extensions.NotRequired["NestedExtensionsMovie"]
+
+    _valid(ExtensionsMovie, {"title": "Jaws"}, {"title": "Jaws", "year": 1975})
+    _invalid(
+        ExtensionsMovie,
+        {"title": "Jaws", "year": "1975"},
+        {"year": 1975},
+        {"title": "Jaws", 1: 2},
+        [],
+    )
+    _valid(NestedExtensionsMovie, {"title": "Jaws", "sequel": {"title": "2"}})
+    _invalid(NestedExtensionsMovie, {"title": "Jaws", "sequel": {"year": 1978}})
 
 # NamedTuple ----------------------------------------------------------------
 _valid(NamedTuple, Point(1, 2), LegacyPoint(1, 2))

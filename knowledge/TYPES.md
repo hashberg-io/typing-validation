@@ -190,6 +190,7 @@ v1 ignored constraints silently, so `validate(1.5, T)` passed for a `T` constrai
 - Extra keys not named in the annotations — `[impossible]` in 3.14. PEP 728's `closed=True` and `__extra_items__` would make this expressible, but 3.14's `TypedDict` rejects the `closed` keyword outright, and we take no `typing_extensions` dependency. Revisit when the language supports it.
 - That the value is *actually* a `TypedDict` instance — `[impossible]`. `TypedDict` has no runtime identity; any conforming mapping is indistinguishable from one.
 
+A `TypedDict` defined with `typing_extensions` is recognised as one, although `typing.is_typeddict` does not recognise it; the library still never imports `typing_extensions` itself.
 `Required[X]`, `NotRequired[X]` and `ReadOnly[X]` qualifiers are recognised and stripped.
 Requiredness is taken from `__required_keys__` / `__optional_keys__` rather than re-derived from the annotations.
 `ReadOnly` has **no runtime meaning** — it constrains assignment, not value shape — so `ReadOnly[X]` validates exactly as `X`. It is recognised so that it does not read as an unsupported type; `__readonly_keys__` is available and reported by `inspect_type`, but never affects a verdict.

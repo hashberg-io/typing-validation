@@ -17,6 +17,7 @@ binds this module to the other mechanisms, and the conformance suite is what
 keeps them honest.
 """
 
+import sys
 from collections import defaultdict, deque
 from collections.abc import (
     Buffer,
@@ -482,7 +483,7 @@ def _check_bare(
         # the only runtime witness there is.
         return isinstance(val, tuple) and hasattr(type(val), "_fields")
     if isinstance(t, type):
-        if is_typeddict(t):
+        if is_typeddict(t) or _is_extensions_typed_dict(t):
             return _check_typed_dict(val, t, stack)
         if is_protocol(t):
             if not getattr(t, "_is_runtime_protocol", False):
@@ -495,6 +496,18 @@ def _check_bare(
     if isinstance(t, (str, ForwardRef)):
         raise UnsupportedTypeError(t, _INLINE_FORWARD_REF_EXPLANATION)
     raise UnsupportedTypeError(t)
+
+
+def _is_extensions_typed_dict(t: type, /) -> bool:
+    """
+    Whether a class is a ``TypedDict`` defined with ``typing_extensions``, which
+    :func:`typing.is_typeddict` does not recognise.
+
+    Such a class can only exist if ``typing_extensions`` has been imported, so
+    asking it costs no import of our own.
+    """
+    extensions = sys.modules.get("typing_extensions")
+    return extensions is not None and bool(extensions.is_typeddict(t))
 
 
 def _check_typed_dict(
