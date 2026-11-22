@@ -47,7 +47,7 @@ def lookup(t: Any, /) -> "TypeNode | None":
     its signal to build an unshared node.
     """
     for tier in reversed(_TIERS):
-        node = tier.get(t)
+        node: "TypeNode | None" = tier.get(t)
         if node is not None:
             return node
     return None
