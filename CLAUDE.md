@@ -22,7 +22,7 @@ Keep them that way.
 | **2.1** | `validator` — closure composition | **released** (tag `v2.1.0`) |
 | **2.2** | `compiled_validator` — codegen via `exec` | **released** (tag `v2.2.0`) |
 | **2.2.1** | patch: messages survive a value or type whose `__repr__` raises; `Type[T]` support decided from `T` alone | **released** (tag `v2.2.1`) |
-| **2.2.2** | patch: `ByteString` validated against `Buffer` without deprecation warnings on 3.15 (#28, Miroslav Suchý); `Type[T]` accepts any class `issubclass` can take (#26, Egor Vorontsov) | **ready, not yet tagged** |
+| **2.2.2** | patch: `ByteString` validated against `Buffer` without deprecation warnings on 3.15 (#28, Miroslav Suchý); `Type[T]` accepts any class `issubclass` can take (#26, Egor Vorontsov); compiled validators reject non-string `TypedDict` keys; `typing_extensions` `TypedDict`s recognised | **ready, not yet tagged** |
 | — | marshalling — persistent bytecode cache | **measured and declined.** Not blocked, not deferred: `benchmark/marshalling.py` measured what it would buy and the answer was milliseconds. See DESIGN.md §14 and *Marshalling* below |
 | next | a runtime subtype relation | waits on Python 3.15 — see *Waiting on Python 3.15* |
 
