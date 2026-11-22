@@ -6,32 +6,32 @@ typing_validation.composition
 Check
 -----
 
-.. autodata:: typing_validation.composition.Check
+.. autotype:: typing_validation.composition.Check
 
 Composed
 --------
 
-.. autodata:: typing_validation.composition.Composed
+.. autotype:: typing_validation.composition.Composed
 
 Runner
 ------
 
-.. autodata:: typing_validation.composition.Runner
+.. autotype:: typing_validation.composition.Runner
 
 Stack
 -----
 
-.. autodata:: typing_validation.composition.Stack
+.. autotype:: typing_validation.composition.Stack
 
 Unions
 ------
 
-.. autodata:: typing_validation.composition.Unions
+.. autotype:: typing_validation.composition.Unions
 
 Validator
 ---------
 
-.. autodata:: typing_validation.composition.Validator
+.. autotype:: typing_validation.composition.Validator
 
 runner_for
 ----------

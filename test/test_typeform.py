@@ -8,9 +8,10 @@ literal and :obj:`None` are type *forms* rather than classes, so it rejects
 ``validated(x, int | str)`` — about the most ordinary thing anyone would write.
 PEP 747's ``TypeForm[T]`` is the form of that distinction.
 
-Adopting it costs nothing: the import is type-checking-only, typeshed carries the
-stub so mypy needs no package installed, and the docs read annotations as
-strings. These tests hold that bargain to its terms.
+Adopting it costs nothing. From 3.15 it is :obj:`typing.TypeForm`; on 3.14 the
+import is type-checking-only, typeshed carries the stub so mypy needs no package
+installed, and the docs read annotations as strings. These tests hold that
+bargain to its terms on both.
 """
 
 import pathlib
@@ -25,7 +26,7 @@ import pytest
 from typing_validation import validated
 
 
-def _mypy(source: str, tmp_path: pathlib.Path, /) -> str:
+def _mypy(source: str, tmp_path: pathlib.Path, python_version: str, /) -> str:
     # A file rather than `-c`, because the project's own mypy config names the
     # files to check and mypy refuses both at once. `--no-site-packages` is
     # deliberately absent: resolving typing_extensions from typeshed is the whole
@@ -39,6 +40,8 @@ def _mypy(source: str, tmp_path: pathlib.Path, /) -> str:
             "mypy",
             "--no-incremental",
             "--no-error-summary",
+            "--python-version",
+            python_version,
             str(script),
         ],
         capture_output=True,
@@ -65,10 +68,11 @@ ACCEPTS = """
 
 class TestStaticInference:
 
+    @pytest.mark.parametrize("python_version", ["3.14", "3.15"])
     def test_every_form_is_accepted_and_inferred(
-        self, tmp_path: pathlib.Path
+        self, tmp_path: pathlib.Path, python_version: str
     ) -> None:
-        out = _mypy(ACCEPTS, tmp_path)
+        out = _mypy(ACCEPTS, tmp_path, python_version)
         assert "error:" not in out, out
         for expected in (
             'Revealed type is "int"',
@@ -82,9 +86,10 @@ class TestStaticInference:
 
 class TestTheBargain:
     """
-    ``TypeForm`` is imported under ``TYPE_CHECKING``, which is what keeps this a
-    zero-dependency library. If any of these stops holding, the trade has changed
-    and the import should be reconsidered.
+    ``TypeForm`` comes from the standard library on 3.15 and is imported under
+    ``TYPE_CHECKING`` on 3.14, which is what keeps this a zero-dependency
+    library. If any of these stops holding, the trade has changed and the import
+    should be reconsidered.
     """
 
     def test_typing_extensions_is_not_imported_at_runtime(self) -> None:
@@ -109,16 +114,16 @@ class TestTheBargain:
         assert validated([1], list[int]) == [1]
 
 
-def test_typing_dot_typeform_has_not_landed_yet() -> None:
+def test_the_annotations_resolve_from_3_15() -> None:
     """
-    When this fails, 3.15 has arrived with PEP 747 in the standard library, and
-    the ``TYPE_CHECKING`` import should become an ordinary one — which also
-    removes the one cost of the current arrangement, that ``get_type_hints`` on
-    these functions raises ``NameError``.
+    From 3.15 the annotations of :func:`validated` resolve to
+    :obj:`typing.TypeForm`. On 3.14 the name exists only for the type checker,
+    so resolving them raises :class:`NameError`, which is the one cost of the
+    arrangement there.
     """
-    if hasattr(typing, "TypeForm"):  # pragma: no cover
-        pytest.fail(
-            "typing.TypeForm exists: import it directly in validation.py, drop "
-            "the TYPE_CHECKING guard, and drop TypeForm from "
-            "skip_missing_references in docs/conf.py."
-        )
+    if sys.version_info >= (3, 15):
+        hints = typing.get_type_hints(validated)
+        assert typing.get_origin(hints["t"]) is typing.TypeForm
+    else:
+        with pytest.raises(NameError):
+            typing.get_type_hints(validated)

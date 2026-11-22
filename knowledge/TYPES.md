@@ -96,6 +96,15 @@ This is deliberate: the runtime type lattice is the one we validate against, and
 
 **Checks:** `val is None`. Both the `None` spelling and `types.NoneType` are accepted as the type.
 
+### Sentinels
+
+**Supported** · **new**
+
+**Checks:** `val is t`. A sentinel (PEP 661) used as a type stands for itself, as `None` does, so `int | MISSING` admits any int and that one object.
+
+From 3.15 sentinels are the builtin `sentinel`.
+On 3.14 they are `typing_extensions.Sentinel`, which the library recognises without importing.
+
 ### `Any`
 
 **Supported** · *v1 parity*
@@ -106,7 +115,7 @@ This is deliberate: the runtime type lattice is the one we validate against, and
 
 **Supported** · *v1 parity*
 
-The unparametrised forms: `list`, `tuple`, `set`, `frozenset`, `dict`, `collections.deque`, `collections.defaultdict`, and the abstract base classes `Collection`, `Set`, `MutableSet`, `Sequence`, `MutableSequence`, `Iterable`, `Iterator`, `Container`, `Mapping`, `MutableMapping`, `Hashable`, `Sized`, `Buffer`.
+The unparametrised forms: `list`, `tuple`, `set`, `frozenset`, `dict`, `frozendict` (from 3.15), `collections.deque`, `collections.defaultdict`, and the abstract base classes `Collection`, `Set`, `MutableSet`, `Sequence`, `MutableSequence`, `Iterable`, `Iterator`, `Container`, `Mapping`, `MutableMapping`, `Hashable`, `Sized`, `Buffer`.
 
 **Checks:** `isinstance(val, t)` against the runtime class or ABC.
 
@@ -130,7 +139,7 @@ For unordered collections the index is a position in iteration order and is **no
 
 **Supported** · *v1 parity*
 
-`dict[K, V]`, `defaultdict[K, V]`, `Mapping[K, V]`, `MutableMapping[K, V]`.
+`dict[K, V]`, `defaultdict[K, V]`, `frozendict[K, V]` (from 3.15, PEP 814), `Mapping[K, V]`, `MutableMapping[K, V]`.
 
 **Checks:** `isinstance(val, origin)`, then every key against `K` and every value against `V`.
 
@@ -184,10 +193,21 @@ v1 ignored constraints silently, so `validate(1.5, T)` passed for a `T` constrai
 
 **Supported** · **changed**
 
-**Checks:** the value is a mapping with string keys; every required key is present; every key that is present and annotated has a value valid for its annotation.
+**Checks:** the value is a mapping with string keys; every required key is present; every key that is present and annotated has a value valid for its annotation; and every key it does *not* declare is allowed (PEP 728).
+
+What is allowed of an undeclared key depends on how the `TypedDict` was defined:
+- Unconstrained, by default and with `closed=False`.
+- Refused, with `closed=True` or `extra_items=Never`.
+- Required to have a value valid for `T`, with `extra_items=T`. `ReadOnly[T]` validates exactly as `T`, as it does for a field.
+
+Both settings are inherited, which the runtime does not do for us: a class's `__closed__` and `__extra_items__` record only the arguments it was itself given.
+So a class that gives neither takes its setting from the `TypedDict` classes it derives from, and is unsupported if they disagree.
+A class that gives one is validated by it, even where a type checker rejects the definition, such as reopening a closed parent with `closed=False` or adding a field to it: checking that a definition is legal is the type checker's job.
+
+From 3.15 this is the standard library's `TypedDict`.
+On 3.14 it is `typing_extensions.TypedDict`, which the library reads without importing.
 
 **Does not check:**
-- Extra keys not named in the annotations — `[impossible]` in 3.14. PEP 728's `closed=True` and `__extra_items__` would make this expressible, but 3.14's `TypedDict` rejects the `closed` keyword outright, and we take no `typing_extensions` dependency. Revisit when the language supports it.
 - That the value is *actually* a `TypedDict` instance — `[impossible]`. `TypedDict` has no runtime identity; any conforming mapping is indistinguishable from one.
 
 A `TypedDict` defined with `typing_extensions` is recognised as one, although `typing.is_typeddict` does not recognise it; the library still never imports `typing_extensions` itself.
@@ -372,7 +392,6 @@ Each of these raises `UnsupportedTypeError` and poisons any type containing it.
 | Non-runtime-checkable `Protocol` | `[impossible]`. `isinstance` against it raises. |
 | Inline forward references | See [Forward references](#forward-references). |
 | `collections.namedtuple` | `[impossible]`. A factory function, not a type; `isinstance` against it can only raise. Never a valid annotation. See [`NamedTuple`](#namedtuple). |
-| PEP 728 `closed` / `__extra_items__` | `[impossible]` in 3.14; the language does not have it yet. |
 
 ## Deviations from v1
 

@@ -23,6 +23,7 @@ from typing_validation import (
 from typing_validation._cache import _TIERS
 from typing_validation.nodes import node_for
 
+from . import cases
 from .cases import (
     INVALID,
     UNSUPPORTED_TYPES,
@@ -103,6 +104,20 @@ class TestForms:
         assert node.form is TypeForm.ALIAS
         assert node.t is MyInt
         assert node.children[0].t is int
+
+    def test_a_typed_dict_records_what_its_undeclared_keys_may_be(
+        self,
+    ) -> None:
+        pytest.importorskip("typing_extensions")
+        open_ = inspect_type(Movie)
+        assert not open_.closed and open_.extra_items is None
+        closed = inspect_type(cases.ExtensionsInheritsClosed)
+        assert closed.closed and closed.extra_items is None
+        extras = inspect_type(cases.ExtensionsExtraInts)
+        assert not extras.closed
+        assert extras.labels == ("x",)
+        assert extras.extra_items is extras.children[1]
+        assert extras.extra_items.t is int
 
     def test_annotated_keeps_its_metadata_in_the_type(self) -> None:
         node = inspect_type(Annotated[int, "m"])

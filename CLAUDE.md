@@ -1,7 +1,7 @@
 # typing-validation
 
 Runtime validation of Python objects against type hints.
-Version 2 is a ground-up redesign: Python 3.14+ only, LGPL-3.0-or-later, zero runtime dependencies.
+Version 2 is a ground-up redesign: Python 3.14 and later (CI tests 3.14 and 3.15), LGPL-3.0-or-later, zero runtime dependencies.
 
 ## The design is written down. Read it before implementing.
 
@@ -24,7 +24,8 @@ Keep them that way.
 | **2.2.1** | patch: messages survive a value or type whose `__repr__` raises; `Type[T]` support decided from `T` alone | **released** (tag `v2.2.1`) |
 | **2.2.2** | patch: `ByteString` validated against `Buffer` without deprecation warnings on 3.15 (#28, Miroslav Suchý); `Type[T]` accepts any class `issubclass` can take (#26, Egor Vorontsov); compiled validators reject non-string `TypedDict` keys; `typing_extensions` `TypedDict`s recognised; a nested `TypedDict`'s missing key named correctly; `TypedDict` fields located as `value['year']` rather than `value.year` | **released** (tag `v2.2.2`) |
 | — | marshalling — persistent bytecode cache | **measured and declined.** Not blocked, not deferred: `benchmark/marshalling.py` measured what it would buy and the answer was milliseconds. See DESIGN.md §14 and *Marshalling* below |
-| next | a runtime subtype relation | waits on Python 3.15 — see *Waiting on Python 3.15* |
+| **2.3.0** | Python 3.15 supported alongside 3.14; closed `TypedDict`s and `extra_items`, `frozendict[K, V]` and sentinels validated | **on the `python-3-15` branch**, after 2.2.2 |
+| next | a runtime subtype relation | unblocked by Python 3.15, not started — see *Python 3.15* |
 
 Each stage manufactures the oracle for the next, so the order is not negotiable: `validator` is conformance-tested against `validate`, and `compiled_validator` against both.
 
@@ -32,7 +33,7 @@ Every breaking change lands in 2.0. Stages 2 and 3 are purely additive.
 
 ### Buildable now
 
-With marshalling declined and the subtype relation waiting on an interpreter that does not exist yet, **the roadmap has no unblocked release on it.** These are the things that can be done anyway. Each is small, none is a milestone, and each is argued somewhere else in this file rather than here — this list is only a way in.
+Marshalling is declined, and the subtype relation is unblocked by Python 3.15 but not started. These are the smaller things that can be done alongside it. Each is small, none is a milestone, and each is argued somewhere else in this file rather than here — this list is only a way in.
 
 - **Namespace `__validate__`.** The strongest objection to the extension point is its name, and it does not depend on ever proposing anything upstream. It is the only bare dunder in the field: every peer either namespaces or uses no dunder at all. Breaking, so it wants a deprecation window and therefore wants starting early. See *Raised by the peer comparison* and [knowledge/GENERIC-ARGUMENTS.md](knowledge/GENERIC-ARGUMENTS.md).
 - **Report the three findings owed upstream** — msgspec's recursive `Tree`, typedload's `AssertionError` from its own error path, beartype's `TypeHint` rejecting forms `is_bearable` accepts. Verified against installed sources, written up, and still unsent. Not code at all, which is why it keeps not happening. See *Raised by the peer comparison*.
@@ -53,7 +54,7 @@ Each release's design question was settled by **measuring before building**, and
 ## Where to pick up
 
 - **An unrolling fallback gate** was tried and rejected — see *The unrolling gate* below. Do not revive it without a run-time measurement, which coverage cannot substitute for.
-- **The open issues have been triaged, and three of the six were already answered.** #21 asked for a prepared validator and got one in 2.1; #22 asked for PEP 695 `type` statements, which v2 supports as `TypeForm.ALIAS`; #24 reported that objects with a failing `__repr__` could not be validated, which v2 validates fine but could not *report on* until this was fixed. What remains is #11, #18 and #23, which are one milestone and not three — see *Waiting on Python 3.15*. The lesson worth keeping is that a ground-up rewrite closes issues silently, so an issue tracker predating it says nothing about the current code until each entry is re-run against it: two of the three were fixed years before anyone said so.
+- **The open issues have been triaged, and three of the six were already answered.** #21 asked for a prepared validator and got one in 2.1; #22 asked for PEP 695 `type` statements, which v2 supports as `TypeForm.ALIAS`; #24 reported that objects with a failing `__repr__` could not be validated, which v2 validates fine but could not *report on* until this was fixed. What remains is #11, #18 and #23, which are one milestone and not three — see *Python 3.15*. The lesson worth keeping is that a ground-up rewrite closes issues silently, so an issue tracker predating it says nothing about the current code until each entry is re-run against it: two of the three were fixed years before anyone said so.
 - **Marshalling was measured and declined**, and the reasoning is below under *Marshalling*. Do not reopen it as "the last unbuilt stage" — it is a closed question with numbers behind it, and `benchmark/MARSHALLING.md` holds them.
 - **PyPI is current**: 2.0.0, 2.1.0 and 2.2.0 are all published. Stefano uploads from his own machine, with `python pypi-upload.py v<x.y.z>`, which builds from the tag rather than the working tree.
 - **`benchmark/REPORT.md`** is regenerated by `python -m benchmark --write` and committed deliberately. CI does **not** check it is current, on purpose: a threshold on a noisy shared runner flakes and then gets disabled. **`benchmark/PEER-COMPARISON.md`** is the written synthesis over it, and is not generated.
@@ -118,10 +119,22 @@ None of these are committed to. They are the things the peer work surfaced that 
 - **Should the tiering be published?** The ecosystem has no shared vocabulary for checking vs sampling vs rebuilding, and the absence is what lets benchmarks compare things that cannot be compared.
 - **Three findings are owed upstream.** msgspec takes 16.7 ms on a 121-node recursive `Tree` *and* returns the wrong verdict on both recursive cases; typedload's `Loader` raises `AssertionError` from its own error path on `NamedTuple` while `typedload.load` raises cleanly; beartype's `TypeHint` rejects six type forms `is_bearable` accepts. None reported yet. Separately, and not a bug: `BeartypeStrategy.On` is documented in beartype's own source as unimplemented and silently returns the O(1) answer, so anyone benchmarking beartype as an exact checker by setting it measures a sampling library and believes otherwise.
 
-## Waiting on Python 3.15
+## Python 3.15
 
-- **`typing.TypeForm` replaces the `typing_extensions` import.** PEP 747 is already adopted: `validated` takes `TypeForm[T]`, imported under `TYPE_CHECKING` so the library keeps zero runtime dependencies (typeshed carries the stub, so mypy needs nothing installed, and the docs read annotations as strings). The one cost is that `get_type_hints` on those functions raises `NameError` until the name exists at runtime. `test_typeform.py` fails deliberately when `typing.TypeForm` appears, and says what to change.
-- **`TypeForm[T]` as a *checkable* type** — i.e. `validate(int | str, TypeForm[int | str])`. Not started, and not small: it means implementing PEP 747's subtyping rules, which is a genuinely different job from anything in 2.0 — every other form asks "is this value an X", this one asks "does this type form denote a subtype of X". It would subsume `_TYPE_ARG_EXPLANATION` in `validation.py`, since `Type[T]`'s restriction to classes and unions of classes exists precisely because `issubclass` cannot express the rest. Worth its own milestone, and worth deciding whether `Type[list[int]]` should then become supported.
+- **`TypeForm` comes from `typing` on 3.15, and stays type-checking-only on 3.14.**
+  `validated` takes `TypeForm[T]` (PEP 747).
+  On 3.14 it is imported from `typing_extensions` under `TYPE_CHECKING`, so the library keeps zero runtime dependencies, and `get_type_hints` on those functions raises `NameError` there; on 3.15 they resolve.
+  `test_typeform.py` checks both, and mypy runs against both versions in CI.
+  `docs/conf.py` still skips `TypeForm`, because Read the Docs has no 3.15 builder and builds on 3.14.
+- **The type forms new in 3.15 are supported**, each wherever the language has it.
+  Closed `TypedDict`s and `extra_items` (PEP 728) work with the standard library's `TypedDict` on 3.15 and with `typing_extensions.TypedDict` on 3.14; sentinels (PEP 661) likewise, as the builtin `sentinel` or `typing_extensions.Sentinel`.
+  `frozendict[K, V]` (PEP 814) is checked as a mapping on 3.15, where it exists.
+  The trap in PEP 728 is inheritance: a class's `__closed__` and `__extra_items__` record only its own arguments, so the setting a class inherits has to be worked out from `__orig_bases__`, and a class whose bases disagree is unsupported.
+  A class's own arguments win even where a type checker rejects the definition.
+  The interpreter pays for this on every `TypedDict` it validates, so a plain `TypedDict` is recognised by an inline test before any call; that keeps the cost to about a tenth of a two-microsecond check.
+  Disjoint bases (PEP 800) and lazy imports (PEP 810) need nothing.
+  `TypeForm[T]` itself is refused cleanly, and is the next item.
+- **`TypeForm[T]` as a *checkable* type** — i.e. `validate(int | str, TypeForm[int | str])`. Not started, and not small: on 3.15 nothing blocks it any more, but it means implementing PEP 747's subtyping rules, which is a genuinely different job from anything in 2.0 — every other form asks "is this value an X", this one asks "does this type form denote a subtype of X". It would subsume `_TYPE_ARG_EXPLANATION` in `validation.py`, since `Type[T]`'s restriction to classes and unions of classes exists precisely because `issubclass` cannot express the rest. Worth its own milestone, and worth deciding whether `Type[list[int]]` should then become supported. With 3.14 still supported there is one more decision: `TypeForm[T]` must exist at runtime to be checked, and on 3.14 only `typing_extensions` provides it, so the feature is either 3.15-only or recognises both spellings without importing either.
 
   **Issues #11, #18 and #23 are all this milestone, and none of them is separable from it.** They read as three requests and are one: a subtype relation the library computes itself.
   #23 asks for `validate(list[int], type[list])` — a supertype check between parametrised generics.
@@ -150,7 +163,7 @@ On Windows, which is where this is developed, the interpreter is `.venv\Scripts\
 The `peers` group is the seven distributions behind the ten peer configurations the report's ecosystem half measures against, and it is separate from `dev` because the conformance suite does not need them and CI should not install them. Without it the suite still runs, and `--no-peers` skips that half outright.
 
 `mypy` and `pytest` are configured in `pyproject.toml` and need no arguments.
-Docs build (needs Python 3.14 and the `docs` group):
+Docs build (needs Python 3.14 or later and the `docs` group):
 
 ```console
 $ cd docs && python make-api.py && sphinx-build -M html . _build -W
@@ -160,16 +173,9 @@ $ cd docs && python make-api.py && sphinx-build -M html . _build -W
 
 The benchmark suite pulls v1 out of the **`v1.2.12` tag** with `git archive` and imports it alongside, so the comparison runs in one process. A tag rather than a branch, deliberately: it read `main` until v2 landed there, at which point it would have compared v2 against itself and reported no regression for ever. **`validate` must not be slower than v1** — the one number that may never regress, and the runner says so at the end.
 
-### Owed upstream to `sphinx-docscripts`
-
-Two bugs found here, neither reported yet.
-
-- **`autodoc_typehints.py` cannot parse a `Callable` parameter list.** `Callable[[Any], Literal[True]]` gives *"Found empty type name … annotation[start:stop] = '[Any]'"* — the nested list defeats the annotation parser. Worked around by naming the type: `type Validator = Callable[[Any], Literal[True]]`, which reads better anyway and is declared in `make-api.json`'s `type_aliases`.
-- **The RST title underline is generated at the template's length**, not the project's, so any name longer than `PROJECT_NAME` (12 characters) under-runs its underline. `typing-validation` is 17.
-
 ### Things CPython does that the house style does not expect
 
 - **Exceptions always have a `__dict__`**, whatever `__slots__` says. The slots still keep it empty, which is what they buy; "no instance `__dict__`" is unachievable here.
 - **mypy does not infer attributes assigned in `__new__`**, only in `__init__`. Slotted classes built with `__new__` therefore need annotation-only declarations in the class body. Annotation-only means no assignment, so the slot descriptors survive.
 - **`typing.final` is not enforced at runtime.** It sets `__final__` and is otherwise a message to mypy.
-- **`except A, B:` in `benchmark/tools/v1.py` is correct, not a typo.** PEP 758 lets 3.14 drop the parentheses, and this project is 3.14-only. It reads exactly like the Python 2 syntax it is not, and it has already been "fixed" once by a tool old enough to reject it — black below 25.x cannot parse it. If something reports it as a syntax error, the something is out of date.
+- **`except A, B:` in `benchmark/tools/v1.py` is correct, not a typo.** PEP 758 lets 3.14 drop the parentheses, and this project supports nothing older. It reads exactly like the Python 2 syntax it is not, and it has already been "fixed" once by a tool old enough to reject it — black below 25.x cannot parse it. If something reports it as a syntax error, the something is out of date.

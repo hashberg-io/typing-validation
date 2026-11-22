@@ -16,8 +16,10 @@ shares nothing with the interpreter.
 # compositor and the source emitter are further methods on the node, for the same
 # reason the rest are. See DESIGN.md §3.3 and §3.4.
 
+import builtins
 import enum
 import sys
+import typing
 from collections import defaultdict, deque
 from collections.abc import (
     Callable,
@@ -43,7 +45,9 @@ from typing import (
     is_typeddict,
     Literal,
     NamedTuple,
+    Never,
     NewType,
+    NoReturn,
     Self,
     Tuple,
     TypeAliasType,
@@ -115,6 +119,9 @@ class TypeForm(enum.Enum):
     PROTOCOL = "protocol"
     """A runtime-checkable protocol."""
 
+    SENTINEL = "sentinel"
+    """A sentinel object (PEP 661), which only that object is valid for."""
+
     GENERIC_CLASS = "generic class"
     """A parametrised class whose arguments cannot be checked, by design."""
 
@@ -156,7 +163,17 @@ _COLLECTION_ORIGINS = frozenset(
         MutableSequence,
     }
 )
-_MAPPING_ORIGINS = frozenset({dict, defaultdict, Mapping, MutableMapping})
+_MAPPING_ORIGINS = frozenset(
+    # frozendict is a builtin from 3.15; on 3.14 this falls back to dict, which
+    # is already in the set.
+    {
+        dict,
+        defaultdict,
+        Mapping,
+        MutableMapping,
+        getattr(builtins, "frozendict", dict),
+    }
+)
 _ITERATOR_ORIGINS = frozenset({Iterator})
 _MAYBE_ITEM_ORIGINS = frozenset({Iterable, Container})
 
@@ -182,6 +199,7 @@ class TypeNode:
         "_reason",
         "_check",
         "_can_push",
+        "_closed",
     )
 
     _t: Any
@@ -210,6 +228,12 @@ class TypeNode:
     _reason: str | None
     """Why this node itself is unsupported, if it is. :obj:`None` otherwise."""
 
+    _closed: bool
+    """
+    Whether a :class:`~typing.TypedDict` refuses every key it does not declare
+    (PEP 728). :obj:`False` for every other form.
+    """
+
     _check: Any
     """
     The composed check for this type, once something has asked for one.
@@ -236,6 +260,7 @@ class TypeNode:
         self._reason = None
         self._check = None
         self._can_push = False
+        self._closed = False
         return self
 
     @property
@@ -257,6 +282,24 @@ class TypeNode:
     def labels(self) -> tuple[str, ...] | None:
         """Names for the children, where they have them."""
         return self._labels
+
+    @property
+    def closed(self) -> bool:
+        """Whether a ``TypedDict`` refuses every key it does not declare."""
+        return self._closed
+
+    @property
+    def extra_items(self) -> TypeNode | None:
+        """
+        The node that values under a ``TypedDict``'s undeclared keys must be
+        valid for, when it declares extra items: the one child without a label.
+        """
+        if self._form is not TypeForm.TYPED_DICT:
+            return None
+        declared = len(self._labels or ())
+        if len(self._children) > declared:
+            return self._children[declared]
+        return None
 
     @property
     def supported(self) -> bool:
@@ -339,6 +382,8 @@ def node_for(t: Any, /) -> TypeNode:
         node._form = form
         node._labels = labels
         node._reason = reason
+        if form is TypeForm.TYPED_DICT:
+            node._closed = _typed_dict_extras(node._t) is _CLOSED
         if form is TypeForm.UNSUPPORTED:
             node._supported = False
         children: list[TypeNode] = []
@@ -462,6 +507,8 @@ def _classify(t: Any, /) -> Classified:
         return _plain(TypeForm.TYPE_VAR)
     if tt is NewType:
         return _with(TypeForm.NEW_TYPE, t.__supertype__)
+    if tt is _SENTINEL or _is_extensions_sentinel(tt):
+        return _plain(TypeForm.SENTINEL)
     if isinstance(t, (str, ForwardRef)):
         return _unsupported(_INLINE_FORWARD_REF_REASON)
     if tt is type or isinstance(t, type):
@@ -514,9 +561,15 @@ def _classify(t: Any, /) -> Classified:
 
 def _classify_class(t: Any, /) -> Classified:
     if is_typeddict(t) or _is_extensions_typed_dict(t):
+        extras = _typed_dict_extras(t)
+        if extras is _CONFLICTING:
+            return _unsupported(_CONFLICTING_EXTRAS_REASON)
         fields = _typed_dict_fields(t)
         names = tuple(name for name, _ in fields)
-        return TypeForm.TYPED_DICT, tuple(a for _, a in fields), names, None
+        children = tuple(a for _, a in fields)
+        if extras is not _OPEN and extras is not _CLOSED:
+            children += (extras,)
+        return TypeForm.TYPED_DICT, children, names, None
     if is_protocol(t):
         if not getattr(t, "_is_runtime_protocol", False):
             return _unsupported(_NON_RUNTIME_PROTOCOL_REASON)
@@ -618,6 +671,84 @@ def _is_extensions_typed_dict(t: Any, /) -> bool:
     return extensions is not None and bool(extensions.is_typeddict(t))
 
 
+_SENTINEL = getattr(builtins, "sentinel", None)
+"""The class of PEP 661 sentinels, a builtin from 3.15."""
+
+
+def _is_extensions_sentinel(tt: type, /) -> bool:
+    """
+    Whether a class is ``typing_extensions.Sentinel``, which is how 3.14 spells
+    the builtin. Such a sentinel can only exist once ``typing_extensions`` is
+    imported, so asking it imports nothing.
+    """
+    extensions = sys.modules.get("typing_extensions")
+    return extensions is not None and tt is getattr(
+        extensions, "Sentinel", None
+    )
+
+
+_OPEN = object()
+"""The extra-items setting of a ``TypedDict`` that leaves them unconstrained."""
+
+_CLOSED = object()
+"""The extra-items setting of a ``TypedDict`` that allows none."""
+
+_CONFLICTING = object()
+"""The extra-items setting of a ``TypedDict`` whose bases disagree."""
+
+_ABSENT = object()
+"""What a class without ``__extra_items__`` is read as having."""
+
+
+def _typed_dict_extras(t: Any, /) -> Any:
+    """
+    What a ``TypedDict`` requires of keys it does not declare (PEP 728):
+    :data:`_OPEN`, :data:`_CLOSED`, :data:`_CONFLICTING`, or the type their
+    values must have.
+
+    The class records only its own arguments, so an unspecified setting comes
+    from the ``TypedDict`` classes it derives from. Where it has arguments of
+    its own they win, even if a type checker would reject the definition.
+    """
+    if getattr(t, "__closed__", None) is True:
+        return _CLOSED
+    extra = getattr(t, "__extra_items__", _ABSENT)
+    if not _declares_no_extra_items(extra):
+        ann = strip_qualifiers(resolve(extra, t))
+        return _CLOSED if ann is Never or ann is NoReturn else ann
+    if getattr(t, "__closed__", None) is False:
+        return _OPEN
+    inherited: list[Any] = []
+    for base in getattr(t, "__orig_bases__", ()):
+        base = get_origin(base) or base
+        if not isinstance(base, type):
+            continue
+        if not (is_typeddict(base) or _is_extensions_typed_dict(base)):
+            continue
+        setting = _typed_dict_extras(base)
+        if setting is _CONFLICTING:
+            return _CONFLICTING
+        if setting is not _OPEN and setting not in inherited:
+            inherited.append(setting)
+    if len(inherited) > 1:
+        return _CONFLICTING
+    return inherited[0] if inherited else _OPEN
+
+
+def _declares_no_extra_items(extra: Any, /) -> bool:
+    """
+    Whether an ``__extra_items__`` value is the marker for *not given*:
+    :obj:`typing.NoExtraItems` from 3.15, its own object in
+    ``typing_extensions`` on 3.14.
+    """
+    if extra is _ABSENT or extra is getattr(typing, "NoExtraItems", _ABSENT):
+        return True
+    extensions = sys.modules.get("typing_extensions")
+    return extensions is not None and extra is getattr(
+        extensions, "NoExtraItems", _ABSENT
+    )
+
+
 def _typed_dict_fields(t: Any, /) -> list[tuple[str, Any]]:
     """
     A ``TypedDict``'s field names and resolved types.
@@ -649,6 +780,11 @@ _CALLABLE_REASON = (
 _NON_RUNTIME_PROTOCOL_REASON = (
     "Protocol is not runtime-checkable: isinstance against it raises. Decorate "
     "it with @typing.runtime_checkable."
+)
+
+_CONFLICTING_EXTRAS_REASON = (
+    "TypedDict inherits conflicting extra-items settings from its bases, "
+    "and does not settle them with closed= or extra_items= of its own."
 )
 
 _TYPE_ARG_REASON = (

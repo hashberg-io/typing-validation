@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 __all__ = ()
 
-_TIERS: list[dict[Any, "TypeNode"]] = [{}]
+_TIERS: list[dict[Any, TypeNode]] = [{}]
 """
 The tiers, innermost last.
 
@@ -39,7 +39,7 @@ change an answer, only a cost.
 """
 
 
-def lookup(t: Any, /) -> "TypeNode | None":
+def lookup(t: Any, /) -> TypeNode | None:
     """
     The cached node for a type, innermost tier first, or :obj:`None`.
 
@@ -47,13 +47,13 @@ def lookup(t: Any, /) -> "TypeNode | None":
     its signal to build an unshared node.
     """
     for tier in reversed(_TIERS):
-        node: "TypeNode | None" = tier.get(t)
+        node: TypeNode | None = tier.get(t)
         if node is not None:
             return node
     return None
 
 
-def store(t: Any, node: "TypeNode", /) -> None:
+def store(t: Any, node: TypeNode, /) -> None:
     """Put a node in the innermost tier."""
     _TIERS[-1][t] = node
 

@@ -17,7 +17,9 @@ binds this module to the other mechanisms, and the conformance suite is what
 keeps them honest.
 """
 
+import builtins
 import sys
+import typing
 from collections import defaultdict, deque
 from collections.abc import (
     Buffer,
@@ -45,7 +47,9 @@ from typing import (
     is_typeddict,
     Literal,
     NamedTuple,
+    Never,
     NewType,
+    NoReturn,
     Tuple,
     TypeAliasType,
     TypeVar,
@@ -63,18 +67,20 @@ from .plugins import (
 )
 from ._resolution import resolve, strip_qualifiers
 
-if TYPE_CHECKING:
-    # PEP 747. `type[T]` is what a validation library reaches for and is wrong:
-    # it rejects `validated(x, int | str)`, `Literal["a", "b"]` and `None` — the
-    # most ordinary things anyone validates against — because a union, a literal
-    # and None are type *forms* rather than classes. TypeForm[T] is the form of
-    # that distinction, and mypy already infers through it.
-    #
-    # The import is type-checking-only, so this stays a zero-dependency library:
-    # the name is never looked up at runtime, typeshed carries the stub so mypy
-    # needs nothing installed, and the docs read annotations as strings. The one
-    # cost is that get_type_hints on these functions raises NameError until
-    # typing.TypeForm lands, expected in 3.15.
+# PEP 747. `type[T]` is what a validation library reaches for and is wrong: it
+# rejects `validated(x, int | str)`, `Literal["a", "b"]` and `None` — the most
+# ordinary things anyone validates against — because a union, a literal and None
+# are type *forms* rather than classes. TypeForm[T] is the form of that
+# distinction, and mypy already infers through it.
+#
+# From 3.15 it is in the standard library. On 3.14 the import is
+# type-checking-only, so this stays a zero-dependency library: the name is never
+# looked up at runtime, typeshed carries the stub so mypy needs nothing
+# installed, and the docs read annotations as strings. The one cost, on 3.14
+# only, is that get_type_hints on these functions raises NameError.
+if sys.version_info >= (3, 15):
+    from typing import TypeForm
+elif TYPE_CHECKING:
     from typing_extensions import TypeForm
 
 __all__ = ("is_valid", "validate", "validated", "validated_iter")
@@ -94,7 +100,17 @@ _ITEM_ORIGINS = frozenset(
 )
 """Origins whose every item is checked against a single type argument."""
 
-_MAPPING_ORIGINS = frozenset({dict, defaultdict, Mapping, MutableMapping})
+_MAPPING_ORIGINS = frozenset(
+    # frozendict is a builtin from 3.15; on 3.14 this falls back to dict, which
+    # is already in the set.
+    {
+        dict,
+        defaultdict,
+        Mapping,
+        MutableMapping,
+        getattr(builtins, "frozendict", dict),
+    }
+)
 """Origins whose every key and value is checked against a type argument each."""
 
 _ITERATOR_ORIGINS = frozenset({Iterator})
@@ -442,6 +458,21 @@ def _check(val: Any, t: Any, /) -> bool:
         return False
 
 
+_SENTINEL = getattr(builtins, "sentinel", None)
+"""The class of PEP 661 sentinels, a builtin from 3.15."""
+
+
+def _is_extensions_sentinel(tt: type, /) -> bool:
+    """
+    Whether a class is ``typing_extensions.Sentinel``, which is how 3.14 spells
+    the builtin, asked without importing it.
+    """
+    extensions = sys.modules.get("typing_extensions")
+    return extensions is not None and tt is getattr(
+        extensions, "Sentinel", None
+    )
+
+
 def _check_bare(
     val: Any, t: Any, tt: type, stack: list[tuple[Any, Any]], /
 ) -> bool:
@@ -476,6 +507,9 @@ def _check_bare(
         # report UserId rather than int.
         stack.append((val, t.__supertype__))
         return True
+    if tt is _SENTINEL or _is_extensions_sentinel(tt):
+        # A sentinel (PEP 661) stands for itself, as None does.
+        return val is t
     if t is NamedTuple:
         # "Any named tuple instance", which is what type checkers enforce. There
         # is no nominal marker to check — NamedTuple is a function, and
@@ -510,17 +544,105 @@ def _is_extensions_typed_dict(t: type, /) -> bool:
     return extensions is not None and bool(extensions.is_typeddict(t))
 
 
+_OPEN = object()
+"""The extra-items setting of a ``TypedDict`` that leaves them unconstrained."""
+
+_CLOSED = object()
+"""The extra-items setting of a ``TypedDict`` that allows none."""
+
+_ABSENT = object()
+"""What a class without ``__extra_items__`` is read as having."""
+
+
+def _typed_dict_extras(t: Any, /) -> Any:
+    """
+    What a ``TypedDict`` requires of keys it does not declare (PEP 728):
+    :data:`_OPEN`, :data:`_CLOSED`, or the type their values must have.
+
+    The class records only the arguments it was itself given, so a setting it
+    leaves unspecified is inherited from the ``TypedDict`` classes it derives
+    from. Its own arguments win otherwise, even where a type checker would reject
+    the definition: policing that is the checker's job, not the validator's.
+
+    :raises UnsupportedTypeError: if it inherits conflicting settings.
+    """
+    closed = getattr(t, "__closed__", None)
+    if closed is True:
+        return _CLOSED
+    extra = getattr(t, "__extra_items__", _ABSENT)
+    if not _declares_no_extra_items(extra):
+        ann = strip_qualifiers(resolve(extra, t))
+        if ann is Never or ann is NoReturn:
+            return _CLOSED
+        return ann
+    if closed is False:
+        return _OPEN
+    found = _OPEN
+    for base in getattr(t, "__orig_bases__", ()):
+        # Most bases are TypedDict itself, which is a function: ruling it out
+        # with an attribute lookup rather than get_origin keeps this cheap, and
+        # this runs on every call.
+        cls = (
+            base
+            if isinstance(base, type)
+            else getattr(base, "__origin__", None)
+        )
+        if not isinstance(cls, type):
+            continue
+        if not (is_typeddict(cls) or _is_extensions_typed_dict(cls)):
+            continue
+        setting = _typed_dict_extras(cls)
+        if setting is _OPEN or setting is found:
+            continue
+        if found is _OPEN:
+            found = setting
+        elif setting != found:
+            raise UnsupportedTypeError(t, _CONFLICTING_EXTRAS_EXPLANATION)
+    return found
+
+
+_NO_EXTRA_ITEMS = getattr(typing, "NoExtraItems", _ABSENT)
+"""The standard library's marker for *no extra items given*, from 3.15."""
+
+_PLAIN_BASES = (typing.TypedDict,)
+"""The ``__orig_bases__`` of a ``TypedDict`` that derives from no other."""
+
+
+def _declares_no_extra_items(extra: Any, /) -> bool:
+    """
+    Whether an ``__extra_items__`` value is the marker for *not given*:
+    :obj:`typing.NoExtraItems` from 3.15, its own object in
+    ``typing_extensions`` on 3.14.
+    """
+    if extra is _NO_EXTRA_ITEMS or extra is _ABSENT:
+        return True
+    extensions = sys.modules.get("typing_extensions")
+    return extensions is not None and extra is getattr(
+        extensions, "NoExtraItems", _ABSENT
+    )
+
+
 def _check_typed_dict(
     val: Any, t: Any, stack: list[tuple[Any, Any]], /
 ) -> bool:
     """
     The arm for :class:`~typing.TypedDict`.
 
-    Extra keys are not checked, and cannot be: 3.14's ``TypedDict`` rejects
-    PEP 728's ``closed=True`` outright. Nor is it checked that the value is
-    *actually* a ``TypedDict`` instance, which has no runtime identity — any
-    conforming mapping is indistinguishable from one.
+    Keys it does not declare are checked as PEP 728 says: ignored, refused, or
+    held to the extra-items type. It is not checked that the value is *actually*
+    a ``TypedDict`` instance, which has no runtime identity — any conforming
+    mapping is indistinguishable from one.
     """
+    # The overwhelmingly common TypedDict gives no setting and derives from no
+    # other, and this recognises it without a call: the check runs per value.
+    if (
+        getattr(t, "__closed__", None) is None
+        and getattr(t, "__extra_items__", _NO_EXTRA_ITEMS) is _NO_EXTRA_ITEMS
+        and getattr(t, "__orig_bases__", _PLAIN_BASES) == _PLAIN_BASES
+    ):
+        extras = _OPEN
+    else:
+        extras = _typed_dict_extras(t)
     if not isinstance(val, Mapping):
         return False
     for key in t.__required_keys__:
@@ -535,6 +657,15 @@ def _check_typed_dict(
             return False
         ann = annotations.get(key)
         if ann is None:
+            if extras is _OPEN:
+                continue
+            if extras is _CLOSED:
+                return False
+            if isinstance(extras, ForwardRef):
+                raise UnsupportedTypeError(
+                    t, _unresolved_extras_explanation(t, extras)
+                )
+            stack.append((item, extras))
             continue
         if type(ann) is not type:
             ann = strip_qualifiers(resolve(ann, t))
@@ -688,6 +819,20 @@ _TYPE_ARG_REFUSED_EXPLANATION = (
     "Type[T] is checked with issubclass, which refuses this T: TypedDicts, "
     "protocols that are not runtime-checkable, and protocols with non-method "
     "members all raise when used as its second argument."
+)
+
+
+def _unresolved_extras_explanation(t: Any, ref: ForwardRef, /) -> str:
+    """The explanation for an extra-items type naming something nonexistent."""
+    return (
+        f"The extra items of {t.__qualname__!r} refer to unresolved name "
+        f"{ref.__forward_arg__!r}."
+    )
+
+
+_CONFLICTING_EXTRAS_EXPLANATION = (
+    "TypedDict inherits conflicting extra-items settings from its bases, "
+    "and does not settle them with closed= or extra_items= of its own."
 )
 
 
