@@ -101,9 +101,9 @@ html_theme = "sphinx_rtd_theme"
 skip_missing_references: set[str] = {
     # A type parameter of a generic function, which has no page to link to.
     "T",
-    # PEP 747, imported under TYPE_CHECKING so that the library keeps no runtime
-    # dependency. Resolves here once typing.TypeForm lands, expected in 3.15,
-    # at which point this goes too.
+    # PEP 747. A real import from typing on 3.15, but imported under
+    # TYPE_CHECKING on 3.14, which is what Read the Docs builds with. It goes
+    # once the documentation is built on 3.15.
     "TypeForm",
 }
 # Anything else that fails to resolve is a mistake, and belongs in one of:
