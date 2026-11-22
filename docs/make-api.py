@@ -27,6 +27,11 @@ def _list_package_contents(pkg_name: str) -> list[str]:
     return modules
 
 
+def _is_private_module(mod_name: str) -> bool:
+    """Checks whether any component of the given dotted module name is private."""
+    return any(part.startswith("_") for part in mod_name.split("."))
+
+
 def _public_special_members(cls: type) -> list[str]:
     """
     The special ("dunder") members of a class which opt into the API docs by
@@ -261,7 +266,7 @@ def make_apidocs() -> None:
     include_members = {key: list(value) for key, value in cfg.include_members.items()}
     exclude_members = cfg.exclude_members
     include_modules = cfg.include_modules
-    exclude_modules = cfg.exclude_modules
+    exclude_modules = list(cfg.exclude_modules)
     member_fullnames = cfg.member_fullnames
     special_class_members = cfg.special_class_members
     manual_doc = cfg.manual_doc
@@ -275,6 +280,11 @@ def make_apidocs() -> None:
         if mod_name not in modules_dict:
             modules_dict[mod_name] = importlib.import_module(mod_name)
     os.chdir(cwd)
+    exclude_modules.extend(
+        mod_name
+        for mod_name in modules_dict
+        if _is_private_module(mod_name) and mod_name not in include_modules
+    )
 
     type_aliases = _collect_type_aliases(cfg.type_aliases, modules_dict)
     for mod_name, type_alias_members in type_aliases.items():
