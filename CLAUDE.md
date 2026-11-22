@@ -24,6 +24,7 @@ Keep them that way.
 | **2.2.1** | patch: messages survive a value or type whose `__repr__` raises; `Type[T]` support decided from `T` alone | **released** (tag `v2.2.1`) |
 | **2.2.2** | patch: `ByteString` validated against `Buffer` without deprecation warnings on 3.15 (#28, Miroslav Suchý); `Type[T]` accepts any class `issubclass` can take (#26, Egor Vorontsov); compiled validators reject non-string `TypedDict` keys; `typing_extensions` `TypedDict`s recognised; a nested `TypedDict`'s missing key named correctly; `TypedDict` fields located as `value['year']` rather than `value.year` | **ready, not yet tagged** |
 | — | marshalling — persistent bytecode cache | **measured and declined.** Not blocked, not deferred: `benchmark/marshalling.py` measured what it would buy and the answer was milliseconds. See DESIGN.md §14 and *Marshalling* below |
+| **2.3.0** | Python 3.15 supported alongside 3.14; closed `TypedDict`s and `extra_items`, `frozendict[K, V]` and sentinels validated | **on the `python-3-15` branch**, after 2.2.2 |
 | next | a runtime subtype relation | unblocked by Python 3.15, not started — see *Python 3.15* |
 
 Each stage manufactures the oracle for the next, so the order is not negotiable: `validator` is conformance-tested against `validate`, and `compiled_validator` against both.
@@ -125,11 +126,14 @@ None of these are committed to. They are the things the peer work surfaced that 
   On 3.14 it is imported from `typing_extensions` under `TYPE_CHECKING`, so the library keeps zero runtime dependencies, and `get_type_hints` on those functions raises `NameError` there; on 3.15 they resolve.
   `test_typeform.py` checks both, and mypy runs against both versions in CI.
   `docs/conf.py` still skips `TypeForm`, because Read the Docs has no 3.15 builder and builds on 3.14.
-- **The type forms new in 3.15 are not supported yet**, and two of them get wrong answers rather than errors.
-  A `TypedDict` declared `closed=True` accepts extra keys, and one with `extra_items=T` never checks the extras against `T` (PEP 728).
-  `frozendict[K, V]` falls through to the generic-class arm, so its keys and values go unchecked (PEP 814).
-  Sentinels in a union (PEP 661) and `TypeForm[T]` itself are refused cleanly.
+- **The type forms new in 3.15 are supported**, each wherever the language has it.
+  Closed `TypedDict`s and `extra_items` (PEP 728) work with the standard library's `TypedDict` on 3.15 and with `typing_extensions.TypedDict` on 3.14; sentinels (PEP 661) likewise, as the builtin `sentinel` or `typing_extensions.Sentinel`.
+  `frozendict[K, V]` (PEP 814) is checked as a mapping on 3.15, where it exists.
+  The trap in PEP 728 is inheritance: a class's `__closed__` and `__extra_items__` record only its own arguments, so the setting a class inherits has to be worked out from `__orig_bases__`, and a class whose bases disagree is unsupported.
+  A class's own arguments win even where a type checker rejects the definition.
+  The interpreter pays for this on every `TypedDict` it validates, so a plain `TypedDict` is recognised by an inline test before any call; that keeps the cost to about a tenth of a two-microsecond check.
   Disjoint bases (PEP 800) and lazy imports (PEP 810) need nothing.
+  `TypeForm[T]` itself is refused cleanly, and is the next item.
 - **`TypeForm[T]` as a *checkable* type** — i.e. `validate(int | str, TypeForm[int | str])`. Not started, and not small: on 3.15 nothing blocks it any more, but it means implementing PEP 747's subtyping rules, which is a genuinely different job from anything in 2.0 — every other form asks "is this value an X", this one asks "does this type form denote a subtype of X". It would subsume `_TYPE_ARG_EXPLANATION` in `validation.py`, since `Type[T]`'s restriction to classes and unions of classes exists precisely because `issubclass` cannot express the rest. Worth its own milestone, and worth deciding whether `Type[list[int]]` should then become supported. With 3.14 still supported there is one more decision: `TypeForm[T]` must exist at runtime to be checked, and on 3.14 only `typing_extensions` provides it, so the feature is either 3.15-only or recognises both spellings without importing either.
 
   **Issues #11, #18 and #23 are all this milestone, and none of them is separable from it.** They read as three requests and are one: a subtype relation the library computes itself.
