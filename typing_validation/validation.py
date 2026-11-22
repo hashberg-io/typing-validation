@@ -37,7 +37,6 @@ from typing import (
     TYPE_CHECKING,
     Annotated,
     Any,
-    ByteString,
     cast,
     get_args,
     get_origin,
@@ -53,6 +52,7 @@ from typing import (
 )
 from annotationlib import ForwardRef
 
+from ._compat import is_bytestring_origin
 from .diagnosis import diagnose
 from .errors import UnsupportedTypeError, ValidationError
 from .plugins import (
@@ -128,17 +128,6 @@ Origins that are reached but deliberately refused, with the reason.
 Without this arm ``Callable[[int], int]`` would fall through to the
 generic-class arm and validate on ``isinstance(val, abc.Callable)``, which is
 the very half-support the form is refused for.
-"""
-
-_BYTESTRING_ORIGIN = get_origin(ByteString)
-"""
-What :obj:`typing.ByteString` unwraps to, which is the *deprecated*
-:class:`collections.abc.ByteString` rather than the
-:class:`~collections.abc.Buffer` it ought to mean.
-
-Following the origin would make this library emit
-:class:`DeprecationWarning`\\ s on its users' behalf and break outright in 3.17,
-so the form is mapped to :class:`~collections.abc.Buffer` instead.
 """
 
 
@@ -430,7 +419,9 @@ def _check(val: Any, t: Any, /) -> bool:
                     for item in val:
                         stack.append((item, item_t))
                     continue
-            elif origin is _BYTESTRING_ORIGIN:
+            # ByteString is deprecated, but remains a supported input form;
+            # check it as Buffer without touching the deprecated origin class.
+            elif is_bytestring_origin(origin):
                 if isinstance(val, Buffer):
                     continue
             elif origin in _UNSUPPORTED_ORIGINS:

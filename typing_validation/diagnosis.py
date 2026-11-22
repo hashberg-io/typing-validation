@@ -23,7 +23,7 @@ here is the value the validator saw, undisturbed.
 # path to diagnostics duty.
 
 import enum
-from collections.abc import Collection, Iterator, Mapping
+from collections.abc import Buffer, Collection, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import (
     NewType,
@@ -37,6 +37,7 @@ from typing import (
     Tuple,
     Union,
 )
+from ._compat import is_bytestring_origin
 from ._display import safe_repr, safe_str
 from .nodes import TypeForm, TypeNode, node_for
 from .plugins import registered_validator
@@ -613,7 +614,11 @@ says both — ``UserId``, and then the ``int`` it turned out not to be.
 def _isinstance_target(node: TypeNode, /) -> Any:
     t = node.t
     origin = get_origin(t)
-    return t if origin is None else origin
+    if origin is None:
+        return t
+    if is_bytestring_origin(origin):
+        return Buffer
+    return origin
 
 
 def _expand_tuple(
